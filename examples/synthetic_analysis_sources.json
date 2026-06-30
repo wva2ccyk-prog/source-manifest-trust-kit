@@ -1,0 +1,35 @@
+{
+  "issue_id": "synthetic_source_review",
+  "sources": [
+    {
+      "source_name": "city_notice",
+      "source_type": "official",
+      "mode": "general",
+      "file_path": "synthetic_city_notice.txt",
+      "title": "Synthetic city shuttle notice",
+      "publisher": "Example City Office",
+      "captured_at": "2026-06-02",
+      "citation_note": "Synthetic example only."
+    },
+    {
+      "source_name": "forum_claim",
+      "source_type": "community",
+      "mode": "general",
+      "file_path": "synthetic_forum_claim.txt",
+      "title": "Synthetic forum claim",
+      "publisher": "Example Forum",
+      "captured_at": "2026-06-02",
+      "citation_note": "Synthetic example only."
+    },
+    {
+      "source_name": "market_commentary",
+      "source_type": "commentary",
+      "mode": "finance",
+      "file_path": "synthetic_market_commentary.txt",
+      "title": "Synthetic market commentary",
+      "publisher": "Example Commentary",
+      "captured_at": "2026-06-02",
+      "citation_note": "Synthetic example only."
+    }
+  ]
+}

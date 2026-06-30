@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/source-manifest-trust-kit/external_review_response.schema.json",
+  "title": "External Review Response",
+  "type": "object",
+  "required": ["schema_version", "issue_id", "advisory_only", "findings", "safety_checks"],
+  "properties": {
+    "schema_version": {"const": "mock-llm-review-v1"},
+    "issue_id": {"type": "string"},
+    "advisory_only": {"const": true},
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["packet_id", "evidence_boundary", "uncertainty_reason", "operator_next_step", "must_not_conclude"],
+        "properties": {
+          "packet_id": {"type": "string", "minLength": 1},
+          "evidence_boundary": {"type": "string"},
+          "uncertainty_reason": {"type": "string"},
+          "operator_next_step": {"type": "string"},
+          "must_not_conclude": {"type": "string"}
+        },
+        "additionalProperties": true
+      }
+    },
+    "safety_checks": {
+      "type": "object",
+      "required": ["contains_financial_advice", "preserves_source_boundaries", "fabricates_missing_evidence"],
+      "properties": {
+        "contains_financial_advice": {"const": false},
+        "preserves_source_boundaries": {"const": true},
+        "fabricates_missing_evidence": {"const": false}
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

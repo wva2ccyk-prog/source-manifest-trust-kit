@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Source Manifest Trust Kit</title>
+  <meta name="description" content="Local static viewer for source-manifest evidence packages">
+  <link rel="stylesheet" href="style.css">
+  <script src="marked.min.js"></script>
+  <script src="purify.min.js"></script>
+</head>
+<body class="theme-dark">
+  <div class="app-container">
+    <header class="app-header">
+      <div class="logo" style="width: 100%; display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
+        <div class="logo-icon"></div>
+        <h1>Source Manifest Trust Kit</h1>
+        <span class="badge">Local Workspace</span>
+        <span class="badge">Static Preview</span>
+        <button id="btn-reset-session" class="btn" style="margin-left: auto; padding: 6px 12px; background: rgba(255,255,255,0.1); color: white; border: 1px solid var(--border-color); font-size: 0.8rem; border-radius: 4px;">Reset Session</button>
+      </div>
+      <div class="alert alert-warning" id="public-scope-banner" style="margin-bottom: 16px;">
+        <strong>Static Preview Boundary:</strong> This viewer previews local artifacts only. It is not API-backed, not a CLI orchestrator, not a production app, not a truth adjudicator, and not a finance-advice surface.
+      </div>
+      <nav class="stage-rail" id="stageRail">
+        <div class="stage-step" data-stage="1" id="stage-1">1. Candidates Ready</div>
+        <div class="stage-step" data-stage="2" id="stage-2">2. Selection Required</div>
+        <div class="stage-step" data-stage="3" id="stage-3">3. Acquisition Ready</div>
+        <div class="stage-step" data-stage="4" id="stage-4">4. Acquisition Review</div>
+        <div class="stage-step" data-stage="5" id="stage-5">5. Analysis Ready</div>
+        <div class="stage-step" data-stage="6" id="stage-6">6. Review Required</div>
+      </nav>
+    </header>
+
+    <main class="main-content">
+      <div class="workspace-area">
+
+        <!-- Panel: Upload Candidate JSON (Stage 1) -->
+        <div class="panel active" id="panel-upload-candidate">
+          <div class="panel-header">
+            <h2>Import Search Candidates</h2>
+            <p>Select your frozen <code>search_candidates.json</code> artifact to begin the discovery workflow.</p>
+          </div>
+          <div class="upload-zone" id="drop-zone-candidates">
+            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="upload-icon"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+            <p>Drag and drop candidate JSON here or click to browse</p>
+            <input type="file" id="file-input-candidates" accept=".json" hidden>
+            <button class="btn btn-primary" onclick="document.getElementById('file-input-candidates').click()">Select File</button>
+          </div>
+          <div class="alert alert-warning">
+            <strong>Security Rule:</strong> This tool operates entirely locally. No candidate files or selections are transmitted over the network.
+          </div>
+        </div>
+
+        <!-- Panel: Candidate Selection (Stage 2) -->
+        <div class="panel" id="panel-candidate-selection">
+          <div class="panel-header">
+            <h2>Candidate Index & Selection</h2>
+            <p id="candidate-meta-info" class="meta-info"></p>
+          </div>
+
+          <div class="alert alert-danger" id="candidate-warnings">
+            <strong>CANDIDATES ONLY - NOT VERIFIED:</strong> Candidate presence is not verification, endorsement, or finance advice. Explicit selection is required.
+          </div>
+
+          <div class="selection-controls">
+            <div class="selection-btns">
+              <button class="btn btn-primary" style="padding: 6px 12px; font-size: 0.8rem;" id="btn-select-all">Select All</button>
+              <button class="btn" style="padding: 6px 12px; font-size: 0.8rem; background: rgba(255,255,255,0.1);" id="btn-clear-all">Clear All</button>
+            </div>
+            <div class="file-import-wrapper">
+              <span>Import Selection JSON:</span>
+              <input type="file" id="file-import-selection" accept=".json" style="display:none;">
+              <button class="btn" style="padding: 4px 8px; font-size: 0.75rem;" onclick="document.getElementById('file-import-selection').click()">Browse</button>
+            </div>
+          </div>
+
+          <div class="candidates-list" id="candidates-container">
+            <!-- Candidates injected here by JS -->
+          </div>
+
+          <div class="selection-action-bar">
+            <div class="form-group">
+              <label for="analysis-request">Global Analysis Request / Citation Note (Optional)</label>
+              <textarea id="analysis-request" rows="2" placeholder="e.g. Run controlled discovery-to-analysis evidence..."></textarea>
+            </div>
+            <button class="btn btn-success" id="btn-generate-selection">Confirm & Generate Selection JSON</button>
+          </div>
+        </div>
+
+        <!-- Panel: Upload Acquisition Log (Stage 3 -> 4) -->
+        <div class="panel" id="panel-upload-acquisition">
+          <div class="panel-header">
+            <h2>Acquisition Verification</h2>
+            <p>After running the acquisition fetch CLI command, import your <code>acquisition_log.json</code> and optionally <code>acquisition_source_index.md</code> for review.</p>
+          </div>
+          <div class="upload-zone" id="drop-zone-acquisition">
+            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="upload-icon"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+            <p>Upload <code>acquisition_log.json</code> to review fetched URLs.</p>
+            <input type="file" id="file-input-acquisition" accept=".json" hidden>
+            <button class="btn btn-primary" onclick="document.getElementById('file-input-acquisition').click()">Select File</button>
+          </div>
+        </div>
+
+        <!-- Panel: Acquisition Review (Stage 4) -->
+        <div class="panel" id="panel-acquisition-review">
+          <div class="panel-header">
+            <h2>Acquisition Review</h2>
+            <p>Review the acquired sources before generating the analysis manifest.</p>
+          </div>
+          <div class="triage-container">
+            <div class="filter-chips" id="acquisition-filter-chips">
+              <button class="filter-chip active" data-filter="all">All <span class="count" id="count-all">0</span></button>
+              <button class="filter-chip" data-filter="fetched">Fetched <span class="count" id="count-fetched">0</span></button>
+              <button class="filter-chip" data-filter="warning">Warnings <span class="count" id="count-warning">0</span></button>
+              <button class="filter-chip" data-filter="non-fetched">Not Fetched <span class="count" id="count-non-fetched">0</span></button>
+            </div>
+          </div>
+
+          <div class="acquisition-list" id="acquisition-container">
+            <!-- Acquisition logs injected here -->
+          </div>
+          <div class="gate-confirmation">
+            <div style="font-size: 0.85rem; color: var(--warning); margin-bottom: 8px;">
+              <strong>Disclaimer:</strong> This checkbox does not perform conversion. The Python CLI <code>--confirm-reviewed</code> flag is the enforcing gate.
+            </div>
+            <label class="checkbox-container">
+              <input type="checkbox" id="gate-acquire-confirm">
+              <span class="checkmark"></span>
+              I confirm I have reviewed these acquisition sources.
+            </label>
+            <button class="btn btn-success" id="btn-generate-analysis-manifest" disabled>Acknowledge Review & View Command</button>
+          </div>
+        </div>
+
+        <!-- Panel: Upload Operator Package (Stage 5 -> 6) -->
+        <div class="panel" id="panel-upload-package">
+          <div class="panel-header">
+            <h2>Operator Package Viewer</h2>
+            <p>Upload your <code>final_operator_package.md</code> for secure, local rendering.</p>
+          </div>
+          <div class="upload-zone" id="drop-zone-package">
+            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="upload-icon"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
+            <p>Upload `final_operator_package.md`</p>
+            <input type="file" id="file-input-package" accept=".md" hidden>
+            <button class="btn btn-primary" onclick="document.getElementById('file-input-package').click()">Select File</button>
+          </div>
+        </div>
+
+        <!-- Panel: Operator Package Viewer (Stage 6) -->
+        <div class="panel" id="panel-package-viewer">
+          <div class="panel-header">
+            <h2>Final Operator Package</h2>
+            <div class="alert alert-danger">
+              <strong>REVIEW REQUIRED:</strong> This source-manifest artifact contains deterministic classification only. Excluded finance claims remain masked. Operator review is required. Not finance advice, production output, or truth adjudication.
+            </div>
+          </div>
+          <div id="package-summary-header" class="pkg-summary-header">
+            <!-- Injected by JS -->
+          </div>
+          <div id="package-jump-list" class="jump-list" style="display:none;">
+            <!-- Injected by JS -->
+          </div>
+          <div class="markdown-body" id="package-content">
+            <!-- Rendered Markdown goes here -->
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Right Sidebar: CLI Guidance -->
+      <aside class="cli-guidance">
+        <div class="cli-header">
+          <h3>Workflow Commands</h3>
+          <p>Run these commands in your workspace terminal.</p>
+          <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 8px; border-top: 1px solid var(--border-color); padding-top: 8px;">
+            <strong>Note:</strong> Commands are examples; replace paths with your local artifact paths. The backend does not require a specific <code>workspace</code> folder.
+          </div>
+        </div>
+
+        <!-- Artifact State Panel & Checklist persistent container -->
+        <div style="padding: 0 24px; display: flex; flex-direction: column; gap: 8px;" id="sidebar-persistent-area">
+          <div id="artifact-state-panel" class="state-panel" style="display: none;">
+            <!-- Uploaded file, issue_id, counts -->
+          </div>
+          <div class="sidebar-section" style="margin-top: 8px; padding-top: 8px;">
+            <h4>Workflow Checklist</h4>
+            <div id="workflow-checklist">
+              <div class="checklist-item" id="check-step-1"><span class="chk-icon"></span> 1. Candidate Upload</div>
+              <div class="checklist-item" id="check-step-2"><span class="chk-icon"></span> 2. Selection JSON Download</div>
+              <div class="checklist-item" id="check-step-3"><span class="chk-icon"></span> 3. Run Acquisition Fetch</div>
+              <div class="checklist-item" id="check-step-4"><span class="chk-icon"></span> 4. Acquisition Review</div>
+              <div class="checklist-item" id="check-step-5"><span class="chk-icon"></span> 5. Generate Manifest</div>
+              <div class="checklist-item" id="check-step-6"><span class="chk-icon"></span> 6. Operator Package Upload</div>
+            </div>
+          </div>
+          <div style="font-size: 0.7rem; color: var(--warning); margin-top: 4px;">
+            ⚠️ <em>The browser cannot know your original absolute local paths. Adjust paths in commands as needed.</em>
+          </div>
+        </div>
+
+        <div class="cli-content" id="cli-content">
+          <!-- Dynamic CLI instructions -->
+          <div class="cli-step active">
+            <h4>1. Validate Candidate Artifact</h4>
+            <div class="code-block">
+              <pre><code id="cli-validate-cmd">python -m source_manifest_kit search-candidates-validate --artifact ./workspace/search_candidates.json</code></pre>
+              <button class="copy-btn" data-target="cli-validate-cmd" title="Copy command">Copy</button>
+            </div>
+            <p class="cli-help">Upload your <code>search_candidates.json</code> to the left to continue.</p>
+          </div>
+        </div>
+      </aside>
+    </main>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>

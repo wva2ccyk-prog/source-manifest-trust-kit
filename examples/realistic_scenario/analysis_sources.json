@@ -1,0 +1,46 @@
+{
+  "issue_id": "realistic_shuttle_review",
+  "analysis_request": "Review which claims are supported, which need verification, and which finance-sensitive statements must not be repeated as advice.",
+  "sources": [
+    {
+      "source_name": "official_notice",
+      "source_type": "official",
+      "mode": "general",
+      "file_path": "official_notice.txt",
+      "title": "Example City Shuttle Pilot Notice",
+      "publisher": "Example City Transportation Office",
+      "captured_at": "2026-06-02",
+      "citation_note": "Synthetic official notice."
+    },
+    {
+      "source_name": "local_news",
+      "source_type": "news",
+      "mode": "general",
+      "file_path": "local_news.txt",
+      "title": "Synthetic local article about shuttle pilot",
+      "publisher": "Example Local News",
+      "captured_at": "2026-06-02",
+      "citation_note": "Synthetic news source."
+    },
+    {
+      "source_name": "forum_rumor",
+      "source_type": "community",
+      "mode": "general",
+      "file_path": "forum_rumor.txt",
+      "title": "Synthetic forum rumor",
+      "publisher": "Example Forum",
+      "captured_at": "2026-06-02",
+      "citation_note": "Synthetic weak source with unsupported causal claim."
+    },
+    {
+      "source_name": "finance_commentary",
+      "source_type": "commentary",
+      "mode": "finance",
+      "file_path": "finance_commentary.txt",
+      "title": "Synthetic market commentary",
+      "publisher": "Example Commentary",
+      "captured_at": "2026-06-02",
+      "citation_note": "Synthetic finance-sensitive source for masking demo."
+    }
+  ]
+}

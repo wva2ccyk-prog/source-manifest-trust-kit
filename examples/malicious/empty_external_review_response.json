@@ -1,0 +1,11 @@
+{
+  "schema_version": "mock-llm-review-v1",
+  "issue_id": "synthetic_source_review",
+  "advisory_only": true,
+  "findings": [],
+  "safety_checks": {
+    "contains_financial_advice": false,
+    "preserves_source_boundaries": true,
+    "fabricates_missing_evidence": false
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/source-manifest-trust-kit/llm_review_packet.schema.json",
+  "title": "LLM Review Packet",
+  "type": "object",
+  "required": ["schema_version", "packet_id", "issue_id", "boundaries", "review_claim_index", "required_output_schema"],
+  "properties": {
+    "schema_version": {"const": "llm-review-packet-v1"},
+    "packet_id": {"type": "string", "minLength": 1},
+    "issue_id": {"type": ["string", "null"]},
+    "purpose": {"type": "string"},
+    "boundaries": {
+      "type": "object",
+      "required": ["advisory_only", "cannot_upgrade_claims", "deterministic_core_is_final_authority", "no_financial_advice"],
+      "properties": {
+        "advisory_only": {"const": true},
+        "cannot_upgrade_claims": {"const": true},
+        "deterministic_core_is_final_authority": {"const": true},
+        "no_financial_advice": {"const": true},
+        "no_investment_or_trading_recommendations": {"const": true},
+        "missing_evidence_requires_uncertainty": {"const": true}
+      },
+      "additionalProperties": true
+    },
+    "review_claim_index": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["packet_id", "risk_tier", "review_bucket", "verification_question", "must_not_conclude"],
+        "properties": {
+          "packet_id": {"type": "string", "minLength": 1},
+          "source_name": {"type": ["string", "null"]},
+          "claim_text_masked": {"type": ["string", "null"]},
+          "claim_category": {"type": ["string", "null"]},
+          "risk_tier": {"type": ["string", "null"]},
+          "review_bucket": {"type": "string"},
+          "review_instruction": {"type": "string"},
+          "verification_question": {"type": "string", "minLength": 1},
+          "must_not_conclude": {"type": "string", "minLength": 1}
+        },
+        "additionalProperties": true
+      }
+    },
+    "verification_questions": {"type": "array"},
+    "required_output_schema": {"type": "object"}
+  },
+  "additionalProperties": true
+}

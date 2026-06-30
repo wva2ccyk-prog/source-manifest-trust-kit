@@ -1,0 +1,52 @@
+{
+  "schema_version": "llm-review-packet-v1",
+  "issue_id": "synthetic_source_review",
+  "purpose": "Ask an LLM or reviewer to critique source/evidence boundaries without upgrading claims.",
+  "boundaries": {
+    "advisory_only": true,
+    "cannot_upgrade_claims": true,
+    "deterministic_core_is_final_authority": true,
+    "no_truth_adjudication": true,
+    "no_financial_advice": true,
+    "no_investment_or_trading_recommendations": true,
+    "missing_evidence_requires_uncertainty": true
+  },
+  "reviewer_instructions": [
+    "Use only the supplied packet and referenced local artifacts.",
+    "Preserve uncertainty when evidence is missing, inaccessible, social-only, or rumor-like.",
+    "Do not provide investment, trading, allocation, target-price, expected-return, or action recommendations."
+  ],
+  "required_output_schema": {
+    "schema_version": "mock-llm-review-v1",
+    "advisory_only": true,
+    "safety_checks": {
+      "contains_financial_advice": false,
+      "preserves_source_boundaries": true,
+      "fabricates_missing_evidence": false
+    }
+  },
+  "review_claim_index": [
+    {
+      "packet_id": "fixture_claim_001",
+      "source_name": "forum_claim",
+      "claim_text_masked": "A forum post alleges a route change because of unnamed pressure, without documents or named sources.",
+      "claim_category": "unobservable",
+      "risk_tier": "high",
+      "review_instruction": "Treat as unresolved unless independent primary evidence is supplied.",
+      "review_bucket": "unsafe_or_high_risk_review_only",
+      "must_not_conclude": "Do not conclude truth, causality, market action, expected return, or investment suitability.",
+      "verification_question": "What primary or independent evidence would be needed before treating this forum allegation as more than unresolved?"
+    }
+  ],
+  "packet_id": "llm_review_packet_synthetic_source_review",
+  "verification_questions": [
+    {
+      "packet_id": "fixture_claim_001",
+      "source_name": "forum_claim",
+      "claim_text_masked": "A forum post alleges a route change because of unnamed pressure, without documents or named sources.",
+      "risk_tier": "high",
+      "question": "What primary or independent evidence would be needed before treating this forum allegation as more than unresolved?",
+      "must_not_conclude": "Do not conclude truth, causality, market action, expected return, or investment suitability."
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "issue_id": "bad_port_fixture",
+  "sources": [
+    {
+      "source_name": "bad_port",
+      "source_type": "news",
+      "mode": "general",
+      "url": "http://example.com:bad/path"
+    }
+  ]
+}

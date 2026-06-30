@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "source-manifest-trust-kit"
+version = "0.1.1"
+description = "Local source-manifest analysis toolkit for evidence-first claim and risk labeling."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+license = "MIT"
+license-files = ["LICENSE"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Security",
+  "Topic :: Text Processing",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "hypothesis>=6.100",
+  "pytest-httpserver>=1.0",
+  "jsonschema>=4.20",
+]
+schema = ["jsonschema>=4.20"]
+html = ["trafilatura>=2.0", "readability-lxml>=0.8.1"]
+cli = ["rich>=13.0"]
+supplychain = ["pip-audit>=2.7", "cyclonedx-bom>=4.0"]
+
+[project.scripts]
+source-manifest-trust-kit = "source_manifest_kit.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.setuptools.package-data]
+source_manifest_kit = ["schemas/*.json"]
+
+[tool.setuptools.packages.find]
+include = ["source_manifest_kit*"]
+exclude = ["tests*", "examples*", "frontend*", "schemas*"]

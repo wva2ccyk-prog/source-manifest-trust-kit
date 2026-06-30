@@ -1,0 +1,51 @@
+# Python caches and build
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+*.egg
+
+# Virtualenvs
+.venv/
+venv/
+env/
+
+# Test / type / lint caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local runtime workspaces and generated analysis outputs
+workspace/
+workspace_*/
+issues/
+operator_package/
+provider_template/
+acquired_sources/
+raw_acquired_sources/
+*.acquisition_log.json
+analysis_source_index.md
+
+# Generated artifacts that should not ship
+*.jsonl
+*.db
+*.sqlite
+*.sqlite3
+*.log
+
+# Local env / secrets
+.env
+.env.*
+*.key
+*.pem
+*.token
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

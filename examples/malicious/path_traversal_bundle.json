@@ -1,0 +1,11 @@
+{
+  "issue_id": "path_traversal_fixture",
+  "sources": [
+    {
+      "source_name": "outside",
+      "source_type": "news",
+      "mode": "general",
+      "file_path": "../outside.txt"
+    }
+  ]
+}
