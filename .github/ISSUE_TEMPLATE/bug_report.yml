@@ -1,0 +1,42 @@
+name: Bug report
+description: Report incorrect or unexpected behavior in the CLI or library.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. This is a local, deterministic toolkit, so please
+        include the exact command and a minimal manifest if possible. Do not paste
+        private, copyrighted, or market-sensitive source text.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you run and what went wrong?
+      placeholder: Command, observed output, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Minimal steps. A small synthetic manifest is ideal.
+      placeholder: |
+        1. python -m source_manifest_kit analysis-package --source-manifest ...
+        2. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit
+      description: Output of `python -m source_manifest_kit --version` or the commit hash.
+    validations:
+      required: false
+  - type: input
+    id: environment
+    attributes:
+      label: OS and Python version
+      placeholder: e.g. Windows 11, Python 3.11
+    validations:
+      required: false

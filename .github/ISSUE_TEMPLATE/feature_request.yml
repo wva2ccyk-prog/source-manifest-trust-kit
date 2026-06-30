@@ -1,0 +1,31 @@
+name: Feature request
+description: Suggest an enhancement that stays within the local, deterministic boundary.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Feature requests that preserve the core boundary (no truth verification,
+        no source ranking authority, no finance advice, no default network or LLM
+        calls) are the most likely to be accepted. See `ROADMAP.md` for direction.
+  - type: textarea
+    id: workflow
+    attributes:
+      label: Operator workflow
+      description: What local workflow are you trying to support?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: What should the toolkit do? How would you invoke it?
+    validations:
+      required: true
+  - type: textarea
+    id: boundary
+    attributes:
+      label: Boundary check
+      description: Confirm this stays local-only and does not add truth verification, ranking authority, or finance advice.
+    validations:
+      required: false
