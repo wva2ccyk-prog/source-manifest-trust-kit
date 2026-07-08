@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 from .report_gates import bucket_for_claim, build_report_gates
-from .risk_policy import sanitize_for_report
+from .risk_policy import escape_markdown_inline, sanitize_for_report
 from .validation import load_run
 
 SECTION_ORDER = [
@@ -47,7 +47,9 @@ def _claim_line(claim: dict, mode: str, detail_mode: str) -> str:
             f"(source: {claim.get('source_name')}; type: {claim.get('claim_type')}; "
             f"risk: {claim.get('risk_tier')}; flags: {flags}; note: {note})"
         )
-    text = sanitize_for_report(claim.get("claim_text", ""), mode)
+    # Escape untrusted claim text FIRST (all modes), then sanitize the escaped
+    # text so sanitize's [blocked-...] tokens stay unescaped and render intact.
+    text = sanitize_for_report(escape_markdown_inline(claim.get("claim_text", "")), mode)
     flags = ", ".join(claim.get("risk_flags") or []) or "none"
     note = claim.get("classification_notes") or ""
     return f"- {text} (source: {claim.get('source_name')}; type: {claim.get('claim_type')}; risk: {claim.get('risk_tier')}; flags: {flags}; note: {note})"
@@ -91,10 +93,14 @@ def render_report(run_dir: str | Path, report_profile: str = "minimal", excluded
     lines: list[str] = ["# Information Trust Report", "", f"- Run ID: {manifest.get('run_id')}", f"- Mode: {mode}"]
     if manifest.get("issue_id"):
         lines.append(f"- Issue ID: {manifest.get('issue_id')}")
-    lines.append("- Safety note: This report separates evidence from interpretation and is not financial advice.")
     if mode == "finance":
+        lines.append("- Safety note: This report separates evidence from interpretation and is not financial advice.")
         lines.append("- Excluded finance content is masked to prevent advice-like leakage.")
     lines.append(f"- Report profile: {profile}")
+    # Record the effective excluded-detail mode so the rendered report
+    # self-documents which mode produced it, even when it came from the
+    # ambient IFTOS_EXCLUDED_DETAIL_MODE env var rather than an explicit arg.
+    lines.append(f"- Excluded detail mode: {detail_mode or 'default'}")
     lines.extend(["", "## Sources"])
     for source in sources:
         lines.append(f"- {source.get('source_id')}: {source.get('source_name')} ({source.get('source_type')}, {source.get('observable_state')})")
@@ -113,7 +119,7 @@ def render_report(run_dir: str | Path, report_profile: str = "minimal", excluded
                 lines.append(_claim_line(claim, mode, detail_mode))
             if bucket == "rumors":
                 lines.append("- Operator note: Rumor/high social claims require corroboration before downstream use.")
-            if bucket == "excluded":
+            if bucket == "excluded" and mode == "finance":
                 lines.append("- Operator note: Excluded finance claims are policy-blocked and masked in this report.")
         lines.append("")
 

@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 from .bundle import _collect_bundle_records
-from .core.risk_policy import sanitize_for_report
+from .core.risk_policy import escape_markdown_inline, sanitize_for_report
 from .ledger.jsonl import write_json
 from .verification import build_verification_packet, load_verification_packet
 
@@ -144,6 +144,35 @@ def import_helper_review(
     return json_path
 
 
+def _escape_imported_review_markdown(raw_text: str) -> str:
+    """Markdown-escape and finance-mask operator-supplied helper review text.
+
+    Imported review text is untrusted (it comes from an external helper/LLM,
+    not the deterministic core), so it must not be able to inject markdown
+    structure or leak unsafe finance advice language into a generated report.
+
+    ``escape_markdown_inline`` neutralizes ``[``, ``]``, backtick, ``<``, and
+    ``>`` so injected links/code-spans/HTML tags (e.g. ``<script>``) render
+    literally instead of being interpreted. It is applied BEFORE
+    ``sanitize_for_report`` so the ``[blocked-...]``/``[excluded-...]`` tokens
+    sanitize inserts stay unescaped and render as intended, while still
+    masking finance advice/action language the same way every other rendered
+    claim in this system is masked.
+
+    Imported review text is embedded as its own standalone block rather than
+    inline after a list marker, so a leading ``#`` at the start of a line
+    would still be parsed as a markdown heading. Backslash-escape any
+    line-leading ``#`` here as well, so an imported review cannot inject a
+    fake heading (e.g. ``## Confirmed Facts``) that could be mistaken for
+    system output.
+    """
+    escaped = escape_markdown_inline(raw_text)
+    sanitized = sanitize_for_report(escaped, "finance")
+    lines = sanitized.split("\n")
+    neutralized = ["\\" + line if line.startswith("#") else line for line in lines]
+    return "\n".join(neutralized)
+
+
 def render_imported_helper_review(review: dict) -> str:
     lines = [
         "# Imported Advisory Helper Review",
@@ -163,7 +192,7 @@ def render_imported_helper_review(review: dict) -> str:
             "The raw imported text remains in `imported_helper_review.json` for audit only."
         )
         lines.append("")
-        lines.append(sanitize_for_report(review["raw_text"], "finance"))
+        lines.append(_escape_imported_review_markdown(review["raw_text"]))
     else:
         lines.append("Structured JSON review imported; see `imported_helper_review.json`.")
     lines.append("")

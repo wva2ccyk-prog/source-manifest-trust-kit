@@ -79,6 +79,68 @@ def test_capture_source_reads_valid_input_text_file(tmp_path):
     assert Path(entry["file_path"]).read_text(encoding="utf-8") == "Copied source text from a local operator file."
 
 
+def test_capture_source_strips_utf8_bom_from_input_text_file(tmp_path):
+    input_file = tmp_path / "bom_clip.txt"
+    input_file.write_bytes("Copied source text saved with a BOM.".encode("utf-8-sig"))
+    entry = capture_source(
+        workspace=tmp_path,
+        issue_id="bom_capture",
+        source_name="bom_source",
+        source_type="news",
+        mode="general",
+        input_text_file=input_file,
+    )
+    captured_text = Path(entry["file_path"]).read_text(encoding="utf-8")
+    assert captured_text == "Copied source text saved with a BOM."
+    assert not captured_text.startswith("﻿")
+
+
+def test_capture_source_disambiguates_slug_collision(tmp_path):
+    first = capture_source(
+        workspace=tmp_path,
+        issue_id="collision_issue",
+        source_name="Source #1",
+        source_type="news",
+        mode="general",
+        text="First source text.",
+    )
+    second = capture_source(
+        workspace=tmp_path,
+        issue_id="collision_issue",
+        source_name="Source@1",
+        source_type="news",
+        mode="general",
+        text="Second source text.",
+    )
+    first_path = Path(first["file_path"])
+    second_path = Path(second["file_path"])
+    assert first_path != second_path
+    assert first_path.name == "Source_1.txt"
+    assert second_path.name == "Source_1_2.txt"
+    assert first_path.read_text(encoding="utf-8") == "First source text."
+    assert second_path.read_text(encoding="utf-8") == "Second source text."
+
+
+def test_capture_source_rejects_duplicate_source_name(tmp_path):
+    capture_source(
+        workspace=tmp_path,
+        issue_id="duplicate_issue",
+        source_name="Same Name",
+        source_type="news",
+        mode="general",
+        text="First capture.",
+    )
+    with pytest.raises(CaptureError, match="Duplicate source_name"):
+        capture_source(
+            workspace=tmp_path,
+            issue_id="duplicate_issue",
+            source_name="same name",
+            source_type="news",
+            mode="general",
+            text="Second capture with same name, different case.",
+        )
+
+
 def test_capture_manifest_is_deterministic_and_source_url_metadata_only(tmp_path):
     capture_source(
         workspace=tmp_path,
@@ -102,7 +164,10 @@ def test_capture_manifest_is_deterministic_and_source_url_metadata_only(tmp_path
     assert manifest["issue_id"] == "manifest_issue"
     assert [source["source_name"] for source in manifest["sources"]] == ["alpha", "zeta"]
     assert manifest["sources"][1]["source_url"] == "https://example.invalid/forum"
-    assert "source_url" not in Path(manifest["sources"][1]["file_path"]).read_text(encoding="utf-8")
+    # file_path is emitted relative to the manifest's own directory (the
+    # normal workspace layout) so it can be read without an absolute-path opt-in.
+    assert not Path(manifest["sources"][1]["file_path"]).is_absolute()
+    assert "source_url" not in (manifest_path.parent / manifest["sources"][1]["file_path"]).read_text(encoding="utf-8")
 
 
 def test_capture_manifest_and_index_output_path_overrides(tmp_path):
@@ -258,4 +323,23 @@ def test_cli_capture_source_manifest_and_analysis_package_smoke(tmp_path):
         source_manifest=tmp_path / "analysis_sources.json",
         output_root=tmp_path / "package",
     )
+    assert (package_dir / "final_operator_package.md").exists()
+
+
+def test_capture_manifest_emits_relative_file_paths_for_normal_workspace_layout(tmp_path):
+    capture_source(
+        workspace=tmp_path,
+        issue_id="relative_path_issue",
+        source_name="news_source",
+        source_type="news",
+        mode="general",
+        text="The city announced a meeting schedule.",
+    )
+    manifest_path = build_capture_manifest(workspace=tmp_path)
+    manifest = _json(manifest_path)
+    source = manifest["sources"][0]
+    assert not Path(source["file_path"]).is_absolute()
+    assert "warnings" not in source
+    # analysis-package must consume the relative path without any absolute-path opt-in.
+    package_dir = build_analysis_package_from_manifest(source_manifest=manifest_path, output_root=tmp_path / "package")
     assert (package_dir / "final_operator_package.md").exists()

@@ -54,7 +54,20 @@ def validate_records(manifest: dict, sources: list[dict], claims: list[dict]) ->
             errors.append(f"Claim {cid} treats official data as causality")
         if mode == "finance" and claim.get("output_level") not in {"excluded", "review_only"} and flags.intersection({"investment_advice_language", "target_price_language", "position_sizing_language", "trade_probability_language"}):
             errors.append(f"Claim {cid} has finance action language outside excluded/review buckets")
-        if claim.get("source_count", 1) > 1 and claim.get("independent_source_count", 0) > 1 and "repetition_without_lineage" in flags:
+        # Repetition is not independent corroboration: a known duplicate
+        # (repetition_without_lineage) coming from an UNTRUSTED source must never be
+        # laundered into a fact/observation bucket via repetition. Identical text from
+        # official/company sources is benign (same primary data), so it is exempt to
+        # avoid hard-blocking legitimate multi-source official reporting. (The old guard
+        # keyed on independent_source_count > 1, which is unreachable — it is capped at 1.)
+        if (
+            "repetition_without_lineage" in flags
+            and stype not in {"official", "company"}
+            and (
+                claim.get("output_level") in {"report_fact_bucket", "report_observation_bucket"}
+                or ctype in {"confirmed_fact", "market_observation", "official_reported_status"}
+            )
+        ):
             errors.append(f"Claim {cid} treats repetition as independent corroboration")
     return errors, warnings
 

@@ -91,10 +91,16 @@ def _normalize_manifest_file_path(raw_path: str, *, index: int) -> str:
     return stripped
 
 
-def _resolve_local_text_file(raw_path: str, *, base_dir: Path, index: int) -> Path:
+def _resolve_local_text_file(raw_path: str, *, base_dir: Path, index: int, allow_absolute: bool = False) -> Path:
     normalized_path = _normalize_manifest_file_path(raw_path, index=index)
     candidate = Path(normalized_path)
     is_relative = not candidate.is_absolute()
+    if not is_relative and not allow_absolute:
+        raise AnalysisManifestError(
+            f"sources[{index}] file_path is an absolute path, which is rejected by default: {raw_path}. "
+            "Use a file_path relative to the manifest directory, or explicitly opt in with "
+            "--allow-absolute-source-paths (analysis-package CLI) / allow_absolute=True."
+        )
     if is_relative:
         candidate = base_dir / candidate
     if candidate.is_symlink():
@@ -134,7 +140,7 @@ def _display_path(value: str | Path | None, *, base_dir: Path) -> str:
         return f"<redacted-external-path>/{path.name or 'path'}"
 
 
-def load_analysis_source_manifest(manifest_file: str | Path) -> dict:
+def load_analysis_source_manifest(manifest_file: str | Path, *, allow_absolute: bool = False) -> dict:
     manifest_path = Path(manifest_file)
     data = json.loads(manifest_path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
@@ -156,7 +162,9 @@ def load_analysis_source_manifest(manifest_file: str | Path) -> dict:
         if missing:
             raise AnalysisManifestError(f"sources[{index}] missing fields: {', '.join(missing)}")
         mode = _normalize_mode(source.get("mode"), index=index)
-        file_path = _resolve_local_text_file(str(source.get("file_path") or ""), base_dir=base_dir, index=index)
+        file_path = _resolve_local_text_file(
+            str(source.get("file_path") or ""), base_dir=base_dir, index=index, allow_absolute=allow_absolute
+        )
         source_name = str(source.get("source_name") or "").strip() or f"source_{index:03d}"
         source_name_key = source_name.lower()
         if source_name_key in seen_source_names:
@@ -276,10 +284,11 @@ def build_analysis_package_from_manifest(
     output_root: str | Path,
     compare_before_issue_dir: str | Path | None = None,
     excluded_detail_mode: str = "detailed",
+    allow_absolute: bool = False,
 ) -> Path:
     root = Path(output_root)
     root.mkdir(parents=True, exist_ok=True)
-    normalized_manifest = load_analysis_source_manifest(source_manifest)
+    normalized_manifest = load_analysis_source_manifest(source_manifest, allow_absolute=allow_absolute)
     issue_id = _safe_slug(normalized_manifest["issue_id"])
 
     manifest_path = root / "analysis_source_manifest.json"

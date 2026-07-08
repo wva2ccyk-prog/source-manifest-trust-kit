@@ -1,9 +1,20 @@
+import importlib.util
 import json
 import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from source_manifest_kit.runs import analyze_file
+
+
+def _goldset_path() -> Path:
+    return Path(__file__).resolve().parents[1] / "evaluation" / "goldset_v1.jsonl"
+
+
+def _evaluation_module_available() -> bool:
+    return importlib.util.find_spec("source_manifest_kit.evaluation") is not None
 
 
 def test_report_generation_after_validation(tmp_path):
@@ -147,3 +158,43 @@ def test_cli_smoke_flow(tmp_path):
     assert (run_dir / "report.md").exists()
     validate = subprocess.run([sys.executable, "-m", "source_manifest_kit", "validate-run", "--run-dir", str(run_dir)], cwd=Path(__file__).resolve().parents[1], text=True, capture_output=True)
     assert validate.returncode == 0, validate.stderr
+
+
+@pytest.mark.skipif(
+    not _evaluation_module_available() or not _goldset_path().exists(),
+    reason="source_manifest_kit.evaluation and/or evaluation/goldset_v1.jsonl are not present yet (ported by a parallel change).",
+)
+def test_cli_eval_goldset_writes_report_and_enforces(tmp_path):
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "source_manifest_kit",
+            "eval-goldset",
+            "--goldset",
+            str(_goldset_path()),
+            "--output-dir",
+            str(tmp_path / "eval_out"),
+        ],
+        cwd=Path(__file__).resolve().parents[1],
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "eval_out" / "eval_report.json").exists()
+    assert (tmp_path / "eval_out" / "eval_report.md").exists()
+
+
+def test_cli_eval_goldset_missing_command_is_registered():
+    # Even before evaluation.py/goldset exist, the subcommand itself must be
+    # registered and only fail at import time inside the command, not at
+    # argparse setup time, so the rest of the CLI keeps working.
+    result = subprocess.run(
+        [sys.executable, "-m", "source_manifest_kit", "eval-goldset", "--help"],
+        cwd=Path(__file__).resolve().parents[1],
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "--goldset" in result.stdout
+    assert "--enforce" in result.stdout

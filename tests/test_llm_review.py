@@ -57,7 +57,7 @@ def test_llm_review_packet_and_mock_review_preserve_boundaries(tmp_path):
         encoding="utf-8",
     )
 
-    package_dir = build_analysis_package_from_manifest(source_manifest=manifest, output_root=tmp_path / "out")
+    package_dir = build_analysis_package_from_manifest(source_manifest=manifest, output_root=tmp_path / "out", allow_absolute=True)
     packet_path = build_llm_review_packet(operator_package_dir=package_dir)
     review_path = run_mock_llm_review(packet_file=packet_path)
 
@@ -142,7 +142,7 @@ def test_external_review_response_validation_accepts_mock_review(tmp_path):
         encoding="utf-8",
     )
 
-    package_dir = build_analysis_package_from_manifest(source_manifest=manifest, output_root=tmp_path / "out")
+    package_dir = build_analysis_package_from_manifest(source_manifest=manifest, output_root=tmp_path / "out", allow_absolute=True)
     packet_path = build_llm_review_packet(operator_package_dir=package_dir)
     review_path = run_mock_llm_review(packet_file=packet_path, output_dir=tmp_path / "external_response")
     validation_path = validate_external_review_response(

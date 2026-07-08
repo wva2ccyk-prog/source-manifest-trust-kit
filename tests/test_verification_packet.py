@@ -196,6 +196,50 @@ def test_verification_packet_does_not_finance_sanitize_general_short_text(tmp_pa
     assert "[blocked-investment-action]" not in md_text
 
 
+def test_packet_ids_stable_across_independent_reruns(tmp_path):
+    # FIX 5: packet_ids are seeded from stable content (issue_id + category +
+    # normalized claim hash), NOT run_id/timestamp, so two full independent reruns
+    # of the same bundle produce identical packet_ids.
+    def _run(root: Path) -> list[str]:
+        issue_dir = _sample_issue(root)
+        packet = json.loads(build_verification_packet(issue_dir=issue_dir).read_text(encoding="utf-8"))
+        return [entry["packet_id"] for entry in packet["packets"]]
+
+    first = _run(tmp_path / "run_one")
+    second = _run(tmp_path / "run_two")
+    assert first == second
+    assert all(pid.startswith("vreq_") for pid in first)
+
+
+def test_verification_packet_escapes_markdown_injection(tmp_path):
+    # FIX 1: the verification masking gate escapes injected markdown/HTML so it
+    # renders literally in the packet.
+    source = tmp_path / "samples" / "injection.txt"
+    _write(
+        source,
+        "The vendor notice included a link [x](http://evil) and embedded <script>alert(1)</script> in the body.",
+    )
+    bundle = tmp_path / "bundle.json"
+    bundle.write_text(
+        json.dumps(
+            {
+                "issue_id": "verify_markdown_injection",
+                "sources": [
+                    {"source_name": "wire", "source_type": "news", "mode": "general", "file_path": str(source)},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    issue_dir = run_issue_bundle(bundle_file=bundle, output_root=tmp_path, report_profile="operator", allow_absolute_paths=True)
+    packet_path = build_verification_packet(issue_dir=issue_dir)
+    combined = packet_path.read_text(encoding="utf-8") + "\n" + packet_path.with_suffix(".md").read_text(encoding="utf-8")
+    assert "\\[x\\]" in combined
+    assert "[x](http://evil)" not in combined
+    assert "&lt;script&gt;" in combined
+    assert "<script>" not in combined
+
+
 def test_verification_packet_defensively_masks_general_mode_finance_text(tmp_path):
     source = tmp_path / "samples" / "general_finance_quote.txt"
     _write(source, "The article quoted a desk saying buying exposure now has a target price and 5x returns.")

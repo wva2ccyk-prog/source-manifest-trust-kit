@@ -7,7 +7,7 @@ from pathlib import Path
 
 from .core.report_gates import build_report_gates
 from .core.reporting import write_report
-from .core.risk_policy import has_manipulation_framing, sanitize_for_report
+from .core.risk_policy import escape_markdown_inline, has_manipulation_framing, sanitize_for_report
 from .core.schema import safe_source_type
 from .core.validation import load_run
 from .ledger.jsonl import write_json
@@ -119,9 +119,21 @@ def _is_risky_unresolved(claim: dict) -> bool:
 
 
 def _safe_claim_text_for_output(claim: dict) -> str:
+    """Single masking gate for every human-facing claim_text render.
+
+    Excluded finance claims collapse to the placeholder; every other claim is
+    escaped (markdown/HTML neutralized) then passed through sanitize_for_report
+    using the run's mode. Mode is stamped on each claim in
+    _collect_bundle_records; default to the safer "finance" when absent so a
+    missing mode never leaks unmasked advice-like text.
+
+    Escape the untrusted claim text FIRST, then sanitize the escaped text so the
+    [blocked-...]/[excluded-...] tokens sanitize inserts remain unescaped.
+    """
     if claim.get("claim_type") == "excluded":
         return _excluded_placeholder(claim)
-    return sanitize_for_report(claim.get("claim_text", ""), str(claim.get("source_mode") or "general"))
+    mode = str(claim.get("mode") or claim.get("source_mode") or "finance")
+    return sanitize_for_report(escape_markdown_inline(claim.get("claim_text", "")), mode)
 
 
 SOURCE_TYPE_ALIASES = {
@@ -137,8 +149,19 @@ FILENAME_SOURCE_HINTS: list[tuple[str, set[str]]] = [
     ("social", {"social", "tweet", "xpost", "x_post", "reddit"}),
     ("community", {"community", "forum", "board", "thread"}),
     ("news", {"news", "article", "wire", "headline", "press"}),
-    ("analyst", {"analyst", "commentary", "opinion", "research", "finance"}),
+    # "finance" removed — a filename containing "finance" is not evidence of
+    # analyst/interpretation material and was silently misrouting plain content.
+    ("analyst", {"analyst", "commentary", "opinion", "research"}),
 ]
+
+
+# Trust-elevating source types must never be assigned from a filename hint
+# (fail-open trust inflation: e.g. `official_reddit_leak.txt` -> "official").
+# Only the explicit sidecar override may assign these; a filename hint that
+# resolves to one of them is ignored in favor of the operator default and a
+# per-source warning is recorded.
+TRUST_ELEVATING_SOURCE_TYPES = {"official", "company"}
+FILENAME_TRUST_HINT_IGNORED_WARNING = "trusted_source_type_hint_ignored_use_override_file"
 
 
 def _coerce_source_type(value: str | None, *, fallback: str = "unknown") -> str:
@@ -236,24 +259,32 @@ def create_bundle_from_folder(
     for path in files:
         source_name = path.stem
         override = overrides.get(path.name.lower()) or overrides.get(source_name.lower())
-        inferred = _infer_source_type_from_filename(path)
+        warnings: list[str] = []
+        # Explicit operator override is authoritative and MAY assign trusted types.
         resolved_source_type = _coerce_source_type(override, fallback="unknown") if override else "unknown"
         if resolved_source_type == "unknown":
-            resolved_source_type = _coerce_source_type(inferred, fallback="unknown")
+            inferred = _coerce_source_type(_infer_source_type_from_filename(path), fallback="unknown")
+            if inferred in TRUST_ELEVATING_SOURCE_TYPES:
+                # Filename hints must not elevate trust. Ignore the hint, fall back
+                # to the operator default, and record a per-source warning.
+                warnings.append(FILENAME_TRUST_HINT_IGNORED_WARNING)
+            elif inferred != "unknown":
+                resolved_source_type = inferred
         if resolved_source_type == "unknown":
             resolved_source_type = _coerce_source_type(default_source_type, fallback="unknown")
-        sources.append(
-            {
-                "source_name": source_name,
-                "source_type": resolved_source_type,
-                "mode": default_mode,
-                "file_path": _bundle_stored_path(
-                    path,
-                    bundle_parent=bundle_parent,
-                    use_absolute_paths=use_absolute_paths,
-                ),
-            }
-        )
+        entry = {
+            "source_name": source_name,
+            "source_type": resolved_source_type,
+            "mode": default_mode,
+            "file_path": _bundle_stored_path(
+                path,
+                bundle_parent=bundle_parent,
+                use_absolute_paths=use_absolute_paths,
+            ),
+        }
+        if warnings:
+            entry["warnings"] = warnings
+        sources.append(entry)
     write_json(output_path, {"issue_id": issue_id, "sources": sources})
     return output_path
 
@@ -323,6 +354,9 @@ def load_bundle(path: str | Path) -> dict:
                 "source_url": source.get("source_url"),
                 "title": source.get("title"),
                 "published_at": source.get("published_at"),
+                # Preserve intake-time warnings (e.g. an ignored trusted filename
+                # hint) so they reach bundle_manifest.json for operator review.
+                "warnings": source.get("warnings") or [],
             }
         )
     return {"issue_id": issue_id, "sources": validated_sources, "_bundle_file": str(bundle_path.resolve())}
@@ -406,6 +440,7 @@ def _collect_bundle_records(issue_dir: Path) -> tuple[dict, list[dict], list[dic
     for row in run_index:
         run_dir = Path(row["run_dir"])
         _run_manifest, sources, claims, reviews = load_run(run_dir)
+        run_mode = _run_manifest.get("mode") or row.get("mode") or "finance"
         for source in sources:
             source["bundle_issue_id"] = manifest["issue_id"]
         for claim in claims:
@@ -413,6 +448,7 @@ def _collect_bundle_records(issue_dir: Path) -> tuple[dict, list[dict], list[dic
             claim["bundle_run_id"] = row["run_id"]
             claim["bundle_source_name"] = row["source_name"]
             claim["source_mode"] = row.get("mode")
+            claim["mode"] = run_mode
         for review in reviews:
             review["bundle_issue_id"] = manifest["issue_id"]
             review["bundle_run_id"] = row["run_id"]
@@ -424,13 +460,22 @@ def _collect_bundle_records(issue_dir: Path) -> tuple[dict, list[dict], list[dic
 
 
 def _cross_run_social_duplicates(claims: list[dict]) -> list[dict]:
+    """Cross-source repetition / laundering detector.
+
+    FIX 2: repetition is grouped across ALL source types, not only
+    community/social. The textbook laundering case is an identical claim shared
+    between a NEWS source and a community repost; keying only on
+    community/social missed it entirely. The community/social grouping is
+    preserved as a subset. This only adds warnings/flags — it never promotes a
+    claim into a higher-trust bucket.
+    """
     grouped: dict[str, list[dict]] = {}
     for claim in claims:
-        if claim.get("source_type") not in {"social", "community"}:
+        if claim.get("claim_type") == "excluded":
             continue
-        ctype = claim.get("claim_type")
-        if ctype not in {"reported_claim", "opinion_or_frame", "unverified_causality", "rumor", "unobservable"}:
-            continue
+        # _normalize_social_variant strips social/community repost prefixes so a
+        # verbatim claim shared between a news source and a community repost still
+        # collapses to the same key; on non-prefixed text it is plain normalization.
         key_text = _normalize_social_variant(claim.get("claim_text", ""))
         if not key_text:
             continue
@@ -438,19 +483,22 @@ def _cross_run_social_duplicates(claims: list[dict]) -> list[dict]:
     notes: list[dict] = []
     group_index = 1
     for _, bucket in sorted(grouped.items(), key=lambda item: item[0]):
-        if len(bucket) <= 1:
+        sources = sorted({claim.get("bundle_source_name") for claim in bucket})
+        # Laundering requires the same text across MORE THAN ONE source; identical
+        # text repeated within a single source is not cross-source corroboration.
+        if len(bucket) <= 1 or len(sources) <= 1:
             continue
         group_id = f"bundle_dup_{group_index:03d}"
         group_index += 1
         run_ids = sorted({claim.get("bundle_run_id") for claim in bucket})
-        sources = sorted({claim.get("bundle_source_name") for claim in bucket})
         note = {
             "group_id": group_id,
             "claim_count": len(bucket),
             "run_count": len(run_ids),
+            "source_count": len(sources),
             "runs": run_ids,
             "sources": sources,
-            "example_claim": bucket[0].get("claim_text", ""),
+            "example_claim": _safe_claim_text_for_output(bucket[0]),
         }
         notes.append(note)
         for claim in bucket:
@@ -467,28 +515,104 @@ def _source_divergence_notes(claims: list[dict]) -> list[str]:
     notes: list[str] = []
     causal = [c for c in claims if c.get("claim_type") == "unverified_causality"]
     if len(causal) > 1:
-        snippets = sorted({(c.get("claim_text") or "")[:120] for c in causal if c.get("claim_text")})
+        snippets = sorted({_safe_claim_text_for_output(c)[:120] for c in causal if c.get("claim_text")})
         if len(snippets) > 1:
             notes.append(f"Causal explanations diverge across sources ({len(snippets)} variants).")
     for conflict in _numeric_divergence_notes(claims):
         notes.append(
             "Numeric divergence requires review: "
-            f"{conflict['variant_count']} reported people-count values ({', '.join(conflict['values'])}) "
-            f"across sources ({', '.join(conflict['sources'])})."
+            f"{conflict['variant_count']} reported values for {conflict['metric']} "
+            f"({', '.join(conflict['values'])}) across sources ({', '.join(conflict['sources'])})."
         )
     return notes
 
 
-def _numeric_divergence_notes(claims: list[dict]) -> list[dict]:
+def _is_english_casualty_claim(text: str) -> bool:
+    lower = text.lower()
+    if re.search(r"\bworkers?\s+(?:were\s+)?affected\b", lower):
+        return True
+    return any(token in lower for token in ("injured", "treated", "casualty", "casualties", "people"))
+
+
+# Korean money/number units in ascending magnitude. 조=10^12, 억=10^8, 만=10^4, 천=10^3.
+_KO_UNIT_VALUES = {"조": 10 ** 12, "억": 10 ** 8, "만": 10 ** 4, "천": 10 ** 3}
+# A Korean amount: one or more <digits><unit> segments (optionally trailing 원), or a
+# plain <digits>원 amount (e.g. "12조 3,000억원", "18조원", "5,000원").
+_KO_AMOUNT_RE = re.compile(r"(?:\d[\d,]*\s*[조억만천]\s*)+원?|\d[\d,]*\s*원")
+_KO_PARTICLE_RE = re.compile(r"(?:은|는|이|가|을|를|의|에서|에|으로|로|와|과|도|만|고|며|라고|이라고)$")
+# Copulas / high-frequency verbs that carry no metric identity.
+_KO_CONTEXT_STOPWORDS = {"이다", "한다", "했다", "있다", "됐다", "라고", "밝혔", "집계", "달했", "기록"}
+_EN_CONTEXT_STOPWORDS = {"the", "and", "was", "were", "are", "that", "with", "for", "from", "reported", "said", "told", "after", "about", "this"}
+
+
+def _parse_korean_amount(expr: str) -> int | None:
+    total = 0
+    found = False
+    for num, unit in re.findall(r"(\d[\d,]*)\s*([조억만천])", expr):
+        total += int(num.replace(",", "")) * _KO_UNIT_VALUES[unit]
+        found = True
+    if found:
+        return total
+    plain = re.search(r"(\d[\d,]*)", expr)
+    if plain:
+        return int(plain.group(1).replace(",", ""))
+    return None
+
+
+def _primary_numeric_amount(text: str) -> tuple[str, int] | None:
+    """Return (display, magnitude) for the first parseable numeric amount, or None.
+
+    Supports Korean 조/억/만/천/원 formats and comma thousands first, then plain
+    numbers and percentages, so the metric-divergence check is language-agnostic.
+    """
+    ko = _KO_AMOUNT_RE.search(text)
+    if ko:
+        magnitude = _parse_korean_amount(ko.group(0))
+        if magnitude is not None:
+            return re.sub(r"\s+", " ", ko.group(0).strip()), magnitude
+    pct = re.search(r"\d+(?:\.\d+)?\s*(?:%|percent|퍼센트|프로)", text)
+    if pct:
+        num = re.search(r"\d+(?:\.\d+)?", pct.group(0))
+        if num:
+            return re.sub(r"\s+", " ", pct.group(0).strip()), int(float(num.group(0)) * 100)
+    num = re.search(r"\d[\d,]*(?:\.\d+)?", text)
+    if num:
+        raw = num.group(0).replace(",", "")
+        return num.group(0), int(float(raw))
+    return None
+
+
+def _numeric_context_key(text: str) -> str:
+    """Deterministic metric-label key from the non-numeric context tokens.
+
+    Conservative by design: two sources only group when their surrounding content
+    tokens match exactly (after stripping amounts and common particles), so
+    unrelated figures (revenue vs share price) never collapse together.
+    """
+    residual = _KO_AMOUNT_RE.sub(" ", text)
+    residual = re.sub(r"\d[\d,]*(?:\.\d+)?\s*(?:%|percent|퍼센트|프로|명|원)?", " ", residual)
+    tokens: set[str] = set()
+    for raw in re.findall(r"[가-힣]{2,}", residual):
+        stripped = _KO_PARTICLE_RE.sub("", raw)
+        if len(stripped) >= 2 and stripped not in _KO_CONTEXT_STOPWORDS:
+            tokens.add(stripped)
+    for word in re.findall(r"[a-z]{3,}", residual.lower()):
+        if word not in _EN_CONTEXT_STOPWORDS:
+            tokens.add(word)
+    if len(tokens) < 2:
+        return ""
+    return "|".join(sorted(tokens))
+
+
+def _english_casualty_divergence(claims: list[dict]) -> list[dict]:
     grouped: dict[str, list[dict]] = {}
     for claim in claims:
         if claim.get("claim_type") == "excluded":
             continue
         text = claim.get("claim_text") or ""
-        lower = text.lower()
-        affected_workers = bool(re.search(r"\bworkers?\s+(?:were\s+)?affected\b", lower))
-        if not affected_workers and not any(token in lower for token in ("injured", "treated", "casualty", "casualties", "people")):
+        if not _is_english_casualty_claim(text):
             continue
+        lower = text.lower()
         values = re.findall(r"\b\d+(?:,\d{3})*(?:\.\d+)?\b", text)
         if not values:
             continue
@@ -503,7 +627,7 @@ def _numeric_divergence_notes(claims: list[dict]) -> list[dict]:
                 "claim_id": claim.get("claim_id"),
                 "source": claim.get("bundle_source_name") or claim.get("source_name"),
                 "value": values[0].replace(",", ""),
-                "claim_text": sanitize_for_report(text, str(claim.get("source_mode") or "general"))[:160],
+                "claim_text": _safe_claim_text_for_output(claim)[:160],
             }
         )
     notes: list[dict] = []
@@ -522,6 +646,58 @@ def _numeric_divergence_notes(claims: list[dict]) -> list[dict]:
             }
         )
     return notes
+
+
+def _generic_numeric_divergence(claims: list[dict]) -> list[dict]:
+    grouped: dict[str, list[dict]] = {}
+    for claim in claims:
+        if claim.get("claim_type") == "excluded":
+            continue
+        text = claim.get("claim_text") or ""
+        # The English casualty path (above) already owns these claims; skip them
+        # here so a casualty conflict is never double-counted.
+        if _is_english_casualty_claim(text):
+            continue
+        amount = _primary_numeric_amount(text)
+        if amount is None:
+            continue
+        context = _numeric_context_key(text)
+        if not context:
+            continue
+        display, magnitude = amount
+        grouped.setdefault(context, []).append(
+            {
+                "claim_id": claim.get("claim_id"),
+                "source": claim.get("bundle_source_name") or claim.get("source_name"),
+                "value": display,
+                "magnitude": magnitude,
+                "claim_text": _safe_claim_text_for_output(claim)[:160],
+            }
+        )
+    notes: list[dict] = []
+    for _context, items in sorted(grouped.items()):
+        magnitudes = {item["magnitude"] for item in items}
+        sources = sorted({item["source"] for item in items if item.get("source")})
+        if len(magnitudes) <= 1 or len(sources) <= 1:
+            continue
+        values = sorted({item["value"] for item in items})
+        notes.append(
+            {
+                "metric": "reported_numeric_value",
+                "variant_count": len(values),
+                "values": values,
+                "sources": sources,
+                "items": items,
+            }
+        )
+    return notes
+
+
+def _numeric_divergence_notes(claims: list[dict]) -> list[dict]:
+    # English casualty path first (owns people-count claims), then the
+    # language-agnostic generic path for everything else (Korean 조/억원 figures,
+    # plain numbers, percentages).
+    return _english_casualty_divergence(claims) + _generic_numeric_divergence(claims)
 
 
 def _sources_with_excluded_claims(claims: list[dict]) -> set[str]:
@@ -632,6 +808,15 @@ def write_bundle_summary(*, issue_dir: str | Path) -> Path:
     ]
     rumor_social = [c for c in claims if c.get("claim_type") != "excluded" and is_rumor_social_claim(c)]
     excluded_finance = [c for c in claims if c.get("claim_type") == "excluded"]
+    # FIX 3: catch every non-excluded, non-rumor claim that did not land in the
+    # low-risk or weak buckets (e.g. a reported_claim forced to risk_tier "medium"
+    # by needs_official_confirmation) so it is never silently omitted from the
+    # summary while present in every other artifact.
+    def _identity(c: dict) -> tuple:
+        return (c.get("bundle_run_id"), c.get("bundle_source_name"), c.get("claim_id"))
+
+    categorized_ids = {_identity(c) for c in low_risk + weak_or_unsupported + rumor_social + excluded_finance}
+    other_reported = [c for c in claims if _identity(c) not in categorized_ids]
     excluded_sources = _sources_with_excluded_claims(claims)
     divergence_notes = _source_divergence_notes(claims)
     numeric_conflicts = _numeric_divergence_notes(claims)
@@ -654,6 +839,12 @@ def write_bundle_summary(*, issue_dir: str | Path) -> Path:
         lines.append("- None")
     else:
         for claim in weak_or_unsupported:
+            lines.append(_format_claim_for_summary(claim, excluded_sources=excluded_sources))
+    lines.extend(["", "## Other Reported Claims Needing Review"])
+    if not other_reported:
+        lines.append("- None")
+    else:
+        for claim in other_reported:
             lines.append(_format_claim_for_summary(claim, excluded_sources=excluded_sources))
     lines.extend(["", "## Rumor / Social / Manipulation-Framing Claims"])
     if not rumor_social:
@@ -678,8 +869,9 @@ def write_bundle_summary(*, issue_dir: str | Path) -> Path:
             lines.append(f"- {note}")
         for note in duplicate_notes:
             lines.append(
-                f"- Cross-run repeated social/community assertion group {note['group_id']}: "
-                f"{note['claim_count']} claims across {note['run_count']} runs ({', '.join(note['sources'])})."
+                f"- Cross-source repeated claim group {note['group_id']}: "
+                f"identical/near-identical text repeated across {note['source_count']} sources "
+                f"({', '.join(note['sources'])}); repetition is not independent corroboration."
             )
     lines.extend(["", "## Follow-Up Verification Questions"])
     grouped_reviews = _group_review_items(reviews)
@@ -767,7 +959,8 @@ def compare_issue_bundles(*, before_issue_dir: str | Path, after_issue_dir: str 
         else:
             for key in keys:
                 item = data[key]
-                text = _safe_claim_text_for_output(item)
+                # claim_text in the map is already the masked/sanitized safe text.
+                text = item.get("claim_text", "")
                 lines.append(f"- {text} (type: {item.get('claim_type')}; risk: {item.get('risk_tier')}; sources: {', '.join(item.get('sources') or [])})")
     lines.append("")
     out_path.write_text("\n".join(lines), encoding="utf-8")

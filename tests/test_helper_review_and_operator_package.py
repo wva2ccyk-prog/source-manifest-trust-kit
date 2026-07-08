@@ -84,6 +84,28 @@ def test_imported_helper_review_markdown_masks_advice_text(tmp_path):
     assert "[blocked-investment-action]" in imported_md
 
 
+def test_imported_helper_review_escapes_markdown_injection(tmp_path):
+    helper_md = tmp_path / "malicious_helper_review.md"
+    _write(
+        helper_md,
+        "## Fake Header\n[x](http://evil)\n<script>alert(1)</script>",
+    )
+    imported_path = import_helper_review(
+        review_file=helper_md,
+        output_dir=tmp_path / "imported",
+        reviewer_name="simulated",
+        model_name="fixture",
+    )
+    imported_md = imported_path.with_suffix(".md").read_text(encoding="utf-8")
+    assert "\\## Fake Header" in imported_md
+    assert "\\[x\\](http://evil)" in imported_md
+    assert "&lt;script&gt;" in imported_md
+    assert "<script>" not in imported_md
+    # The raw text is preserved unescaped in the JSON artifact for audit only.
+    imported_json = imported_path.read_text(encoding="utf-8")
+    assert "<script>alert(1)</script>" in imported_json
+
+
 def test_operator_package_from_folder_contains_required_artifacts_and_masks_finance(tmp_path):
     input_dir = tmp_path / "local_sources"
     _write(input_dir / "01_official_exchange.txt", "The exchange reported the index closed at 2732.20.")

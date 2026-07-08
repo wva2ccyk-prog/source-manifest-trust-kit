@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -43,6 +44,44 @@ def _normalized_text(text: str) -> str:
 
 def _safe_filename(source_name: str) -> str:
     return f"{_safe_slug(source_name)}.txt"
+
+
+def _unique_capture_filename(*, issue_id: str, source_name: str, existing_entries: list[dict]) -> str:
+    """Return a deterministic, collision-free filename for a captured source.
+
+    Two different source_names can normalize to the same slug (e.g. "Source #1"
+    and "Source@1" both -> "Source_1"). Without disambiguation the second
+    capture would silently overwrite the first source's file while
+    capture_log.json kept both entries pointing at the (now overwritten) file.
+    This appends a deterministic "_2", "_3", ... suffix based on filenames
+    already recorded for other source_names in this issue's capture_log.json.
+
+    An exact-duplicate source_name (same issue_id, same name ignoring case)
+    is rejected outright since it is ambiguous which capture it refers to.
+    """
+    slug = _safe_slug(source_name)
+    base_filename = f"{slug}.txt"
+    name_key = source_name.strip().casefold()
+    used_filenames: set[str] = set()
+    for entry in existing_entries:
+        if str(entry.get("issue_id") or "").strip() != issue_id:
+            continue
+        entry_name_key = str(entry.get("source_name") or "").strip().casefold()
+        if entry_name_key == name_key:
+            raise CaptureError(
+                f"Duplicate source_name '{source_name}' for issue_id '{issue_id}'. "
+                "Use a distinct source_name for each captured source."
+            )
+        entry_filename = Path(str(entry.get("file_path") or "")).name
+        if entry_filename:
+            used_filenames.add(entry_filename)
+
+    if base_filename not in used_filenames:
+        return base_filename
+    counter = 2
+    while f"{slug}_{counter}.txt" in used_filenames:
+        counter += 1
+    return f"{slug}_{counter}.txt"
 
 
 def _reject_url_like_text_input(text: str) -> None:
@@ -115,7 +154,10 @@ def capture_source(
         source_path = Path(raw_input)
         if not source_path.is_file():
             raise CaptureError(f"input_text_file not found: {source_path}")
-        raw_text = source_path.read_text(encoding="utf-8")
+        # utf-8-sig strips a leading UTF-8 BOM (common when operator source
+        # files are saved with Windows Notepad) so it never gets glued onto
+        # the first captured claim.
+        raw_text = source_path.read_text(encoding="utf-8-sig")
     else:
         raw_text = str(text)
 
@@ -127,7 +169,10 @@ def capture_source(
     issue_slug = _safe_slug(issue)
     captured_dir = workspace_path / "captured_sources" / issue_slug
     captured_dir.mkdir(parents=True, exist_ok=True)
-    output_file = captured_dir / _safe_filename(name)
+
+    existing_entries = _read_capture_log(workspace_path)
+    filename = _unique_capture_filename(issue_id=issue, source_name=name, existing_entries=existing_entries)
+    output_file = captured_dir / filename
     output_file.write_text(normalized, encoding="utf-8")
 
     safe_acquisition_method = _safe_metadata(acquisition_method or LOCAL_CAPTURE_METHOD, mode=normalized_mode)
@@ -159,11 +204,31 @@ def capture_source(
     if published_at is not None and str(published_at).strip():
         entry["published_at"] = _safe_metadata(published_at, mode=normalized_mode)
 
-    entries = _read_capture_log(workspace_path)
-    entries.append(entry)
-    _write_capture_log(workspace_path, entries)
+    existing_entries.append(entry)
+    _write_capture_log(workspace_path, existing_entries)
     write_capture_source_index(workspace=workspace_path)
     return entry
+
+
+def _manifest_relative_file_path(file_path: str, *, manifest_dir: Path) -> tuple[str, bool]:
+    """Return (file_path, is_relative) for a captured file in an emitted manifest.
+
+    The analysis-package loader rejects absolute file_path entries by default,
+    so the manifest should reference captured files relative to the manifest's
+    own directory whenever they sit underneath it (the normal workspace layout:
+    manifest at the workspace root with captured_sources/ below). If the file
+    is outside the manifest directory (or on a different drive) the relative
+    form would start with "..", which downstream traversal guards reject, so
+    the absolute path is kept and the entry is flagged with a warning.
+    """
+    try:
+        relative = os.path.relpath(file_path, manifest_dir)
+    except ValueError:
+        # Different drive on Windows: no relative form exists.
+        return file_path, False
+    if relative == ".." or relative.startswith(".." + os.sep) or relative.startswith("../"):
+        return file_path, False
+    return relative.replace(os.sep, "/"), True
 
 
 def build_capture_manifest(*, workspace: str | Path, output_path: str | Path | None = None) -> Path:
@@ -178,14 +243,20 @@ def build_capture_manifest(*, workspace: str | Path, output_path: str | Path | N
         raise CaptureError("capture_log.json must contain exactly one issue_id to build an analysis manifest.")
     issue_id = next(iter(issue_ids))
 
+    path = Path(output_path) if output_path else workspace_path / ANALYSIS_SOURCES_FILENAME
+    manifest_dir = path.resolve().parent
+
     sources: list[dict] = []
     for entry in sorted(entries, key=lambda item: (str(item.get("source_name") or "").lower(), str(item.get("file_path") or ""))):
+        file_path, is_relative = _manifest_relative_file_path(str(entry["file_path"]), manifest_dir=manifest_dir)
         source = {
             "source_name": entry["source_name"],
             "source_type": entry["source_type"],
             "mode": entry["mode"],
-            "file_path": entry["file_path"],
+            "file_path": file_path,
         }
+        if not is_relative:
+            source["warnings"] = ["absolute_path_requires_allow_absolute_flag"]
         for field in sorted(OPTIONAL_SOURCE_FIELDS):
             if entry.get(field):
                 source[field] = entry[field]
@@ -196,7 +267,6 @@ def build_capture_manifest(*, workspace: str | Path, output_path: str | Path | N
         "analysis_request": "Analyze locally captured source excerpts. Capture metadata is operator-supplied and not verified by the runtime.",
         "sources": sources,
     }
-    path = Path(output_path) if output_path else workspace_path / ANALYSIS_SOURCES_FILENAME
     write_json(path, manifest)
     return path
 

@@ -12,6 +12,72 @@ def normalized_hash(text: str) -> str:
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]
 
 
+# ---------------------------------------------------------------------------
+# Company-branch guards (local to classification.py; do NOT edit risk_policy).
+# ---------------------------------------------------------------------------
+# FIX 1: A company-typed source must not render self-serving / private-evidence
+# claims — or unverifiable third-party allegations — as confirmed fact, even when
+# no risk flag fires (e.g. "Our internal investigation proved the rival firm
+# bribed ..." raises no lexicon flag but is unobservable, unverifiable material).
+_COMPANY_SELF_SERVING_MARKERS_EN = (
+    "our internal",
+    "our own investigation",
+    "our investigation",
+    "internal investigation",
+    "internal probe",
+    "we proved",
+    "we have proof",
+    "proved that",
+    "we confirmed that",
+)
+_COMPANY_SELF_SERVING_MARKERS_KO = (
+    "우리 내부",
+    "내부 조사",
+    "자체 조사",
+    "내부 조사 결과",
+    "입증했다",
+)
+
+
+def _company_unverifiable_private_allegation(text: str) -> bool:
+    lower = text.lower()
+    if any(marker in lower for marker in _COMPANY_SELF_SERVING_MARKERS_EN):
+        return True
+    if any(marker in text for marker in _COMPANY_SELF_SERVING_MARKERS_KO):
+        return True
+    return False
+
+
+# FIX 2: A company-typed source must not render a forward-looking / predictive
+# claim that is also market-wide / sector-wide in scope as confirmed fact
+# (e.g. "... 업계 전반의 투자 심리가 개선되고 ... 종목 전체의 주가 흐름이 개선될
+# 것이라고 밝혔다."). The -로 form is not a lexicon causal marker, so the existing
+# (causal and market) guard misses it; detect via forward-looking + broad-scope
+# text markers instead.
+_FORWARD_LOOKING_RE_EN = re.compile(
+    r"\b(?:will|expected to|is expected|are expected|projected to|going to|"
+    r"likely to|forecasts?|outlook)\b"
+)
+_FORWARD_LOOKING_RE_KO = re.compile(
+    r"것(?:이다|으로|이라|입니다|이라고)|전망|될\s*것|개선될|호전될|악화될"
+)
+_SCOPE_BROAD_RE_EN = re.compile(
+    r"\b(?:sector-?wide|market-?wide|industry-?wide|"
+    r"entire (?:market|sector|industry)|across the (?:market|sector|industry|board))\b"
+)
+_SCOPE_BROAD_MARKERS_KO = ("업계", "전반", "시장 전체", "종목 전체", "전 종목", "전체 종목", "산업 전반")
+
+
+def _forward_looking_market_wide(text: str) -> bool:
+    lower = text.lower()
+    forward = bool(_FORWARD_LOOKING_RE_EN.search(lower)) or bool(_FORWARD_LOOKING_RE_KO.search(text))
+    if not forward:
+        return False
+    if any(marker in text for marker in _SCOPE_BROAD_MARKERS_KO):
+        return True
+    return bool(_SCOPE_BROAD_RE_EN.search(lower))
+
+
 def _fuzzy_social_assertion_hash(text: str) -> str:
     normalized = text.lower()
     normalized = re.sub(r"^\[[^\]]+\]\s+", "", normalized)
@@ -49,10 +115,13 @@ def classify_claim(text: str, source: SourceRecord, mode: str) -> ClaimRecord:
     confidence = 0.35
     notes = "Default reported claim."
     disallowed_reason: str | None = None
-    if "unobservable_evidence" in flags or source.observable_state == "unobservable":
-        claim_type = "unobservable"; status = "unobservable"; output_level = "review_only"; confidence = 0.2; notes = "Claim depends on inaccessible or unobservable material."
-    elif mode == "finance" and any(flag in flags for flag in {"investment_advice_language", "target_price_language", "position_sizing_language", "trade_probability_language"}):
+    if mode == "finance" and any(flag in flags for flag in {"investment_advice_language", "target_price_language", "position_sizing_language", "trade_probability_language"}):
+        # Finance action/price/allocation/probability language is exclusion-worthy at the
+        # highest priority: it must outrank the unobservable branch so a finance claim that
+        # also carries a private/unobservable marker is still masked as excluded, not leaked.
         claim_type = "excluded"; status = "blocked"; output_level = "excluded"; confidence = 0.9; disallowed_reason = "Finance mode blocks investment-action, price-level, allocation, and probability language."; notes = disallowed_reason
+    elif "unobservable_evidence" in flags or source.observable_state == "unobservable":
+        claim_type = "unobservable"; status = "unobservable"; output_level = "review_only"; confidence = 0.2; notes = "Claim depends on inaccessible or unobservable material."
     elif source_type in {"community", "social"}:
         if manipulation:
             claim_type = "rumor"; status = "unverified"; output_level = "risk_bucket"; confidence = 0.25; notes = "Community/social manipulation-style narrative is treated as rumor and requires review."
@@ -75,6 +144,14 @@ def classify_claim(text: str, source: SourceRecord, mode: str) -> ClaimRecord:
     elif source_type == "company":
         if causal and market:
             claim_type = "unverified_causality"; status = "unverified"; output_level = "risk_bucket"; confidence = 0.45; notes = "Company source does not confirm broad market causality."
+        elif _company_unverifiable_private_allegation(text):
+            # FIX 1: self-serving / private-evidence or unverifiable third-party
+            # allegation must not render as observed fact from a company source.
+            claim_type = "needs_official_source"; status = "unverified"; output_level = "review_only"; confidence = 0.25; notes = "Company claim rests on internal/private evidence or an unverifiable third-party allegation; needs an official or primary source before it can be treated as fact."
+        elif _forward_looking_market_wide(text):
+            # FIX 2: forward-looking, market-wide/sector-wide prediction is
+            # interpretation, not a company-confirmed fact.
+            claim_type = "interpretation"; status = "likely"; output_level = "interpretation_bucket"; confidence = 0.4; notes = "Company forward-looking, market-wide prediction is interpretation and cannot be a confirmed fact."
         else:
             claim_type = "confirmed_fact"; status = "confirmed"; output_level = "report_fact_bucket"; confidence = 0.75; notes = "Company source can support company-specific factual statements."
     elif source_type == "analyst":
@@ -99,7 +176,7 @@ def classify_claim(text: str, source: SourceRecord, mode: str) -> ClaimRecord:
         else:
             claim_type = "needs_official_source"; status = "unverified"; output_level = "review_only"; confidence = 0.25; notes = "Source type is not strong enough for confirmation."
     tier = _risk_tier(flags, claim_type, mode)
-    needs_review = tier in {"high", "critical"} or output_level in {"review_only", "excluded"} or claim_type in {"unverified_causality", "unobservable"}
+    needs_review = tier in {"high", "critical"} or output_level in {"review_only", "excluded"} or claim_type in {"unverified_causality", "unobservable"} or (source_type == "company" and claim_type == "interpretation")
     if source_type in {"community", "social"} and claim_type in {"opinion_or_frame", "rumor"}:
         needs_review = True
     if source_type in {"community", "social"} and claim_type == "confirmed_fact":
