@@ -47,11 +47,64 @@ def test_bundle_create_infers_source_type_and_honors_override_file(tmp_path):
     )
     bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
     types = {item["source_name"]: item["source_type"] for item in bundle["sources"]}
-    assert types["01_official_exchange_status"] == "official"
+    warnings = {item["source_name"]: item.get("warnings") or [] for item in bundle["sources"]}
+    # A filename hint must not fail open into a trust-elevating type. The
+    # "01_official_exchange_status" hint resolves to "official" but is now IGNORED:
+    # it falls back to the operator default ("mixed" -> "unknown") and records a
+    # per-source warning so the ignored elevation is not silent. Assigning
+    # "official" now requires an explicit sidecar override.
+    assert types["01_official_exchange_status"] == "unknown"
+    assert "trusted_source_type_hint_ignored_use_override_file" in warnings["01_official_exchange_status"]
     assert types["02_community_forum_claim"] == "community"
     assert types["03_news_article"] == "news"
     assert types["04_finance_commentary"] == "analyst"
     assert types["05_social_thread_claim"] == "social"
+    # Non-trust-elevating filename hints (community/news/social) must NOT warn.
+    assert warnings["02_community_forum_claim"] == []
+    assert warnings["03_news_article"] == []
+    assert warnings["05_social_thread_claim"] == []
+
+
+def test_filename_hint_does_not_fail_open_into_trusted_source_type(tmp_path):
+    # A filename must never elevate trust on its own. official_* / company_* hints
+    # are ignored, fall back to --default-source-type, and record a warning; an
+    # explicit override may still assign the trusted type; non-trusted hints are
+    # unchanged; and the over-broad "finance" analyst token no longer misroutes.
+    folder = tmp_path / "input"
+    _write(folder / "official_notice.txt", "notice")
+    _write(folder / "community_thread.txt", "thread")
+    _write(folder / "x_finance.txt", "finance")
+    bundle_path = create_bundle_from_folder(
+        issue_id="fail_open_issue",
+        folder=folder,
+        output_file=tmp_path / "bundle.json",
+        default_source_type="news",
+    )
+    sources = {s["source_name"]: s for s in json.loads(bundle_path.read_text(encoding="utf-8"))["sources"]}
+    # official_notice: trust-elevating hint ignored -> default (news) + warning.
+    assert sources["official_notice"]["source_type"] == "news"
+    assert sources["official_notice"]["warnings"] == ["trusted_source_type_hint_ignored_use_override_file"]
+    # community_thread: non-trusted hint honored, no warning.
+    assert sources["community_thread"]["source_type"] == "community"
+    assert "warnings" not in sources["community_thread"]
+    # x_finance: "finance" is no longer an analyst hint -> falls back to news.
+    assert sources["x_finance"]["source_type"] == "news"
+    assert "warnings" not in sources["x_finance"]
+
+    # An explicit sidecar override remains authoritative and MAY assign a trusted
+    # type, with no warning recorded.
+    overrides = tmp_path / "overrides.json"
+    overrides.write_text(json.dumps({"official_notice": "official"}), encoding="utf-8")
+    override_bundle = create_bundle_from_folder(
+        issue_id="fail_open_override_issue",
+        folder=folder,
+        output_file=tmp_path / "override_bundle.json",
+        default_source_type="news",
+        source_type_override_file=overrides,
+    )
+    override_sources = {s["source_name"]: s for s in json.loads(override_bundle.read_text(encoding="utf-8"))["sources"]}
+    assert override_sources["official_notice"]["source_type"] == "official"
+    assert "warnings" not in override_sources["official_notice"]
 
 
 def test_operator_checklist_artifact_generation(tmp_path):

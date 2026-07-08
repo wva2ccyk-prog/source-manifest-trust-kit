@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import functools
 import hashlib
 import html
+import http.client
 import ipaddress
 import json
+import os
 import re
 import socket
+import ssl
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
@@ -120,12 +124,38 @@ def _normalize_positive_int(value: Any, *, label: str) -> int:
     return normalized
 
 
+def _unwrap_ip_address(ip: Any) -> Any:
+    """Unwrap IPv4-mapped / IPv4-compatible IPv6 literals to their embedded IPv4.
+
+    ``ipaddress.IPv6Address.is_global`` already special-cases IPv4-MAPPED
+    addresses (``::ffff:a.b.c.d``). It does NOT special-case the older
+    IPv4-COMPATIBLE form (``::a.b.c.d``): a literal such as ``::127.0.0.1``
+    or ``::10.0.0.1`` is classified purely as an ordinary IPv6 address and
+    reports ``is_global`` True even though it targets an embedded
+    private/loopback IPv4 host. The stdlib's own ``ipv4_compatible`` property
+    was removed (RFC 4291 deprecated the form), so this parses the packed
+    representation directly: an IPv4-compatible literal has its first 96 bits
+    zero and is not the IPv4-mapped prefix (``::ffff:0:0/96``, already
+    unwrapped above). The all-zero (``::``) and loopback (``::1``) addresses
+    are excluded since those are meaningful IPv6 addresses in their own
+    right and are already classified correctly as IPv6.
+    """
+    mapped = getattr(ip, "ipv4_mapped", None)
+    if mapped is not None:
+        return mapped
+    if isinstance(ip, ipaddress.IPv6Address) and int(ip) not in (0, 1):
+        packed = ip.packed
+        if packed[:12] == b"\x00" * 12:
+            return ipaddress.IPv4Address(packed[12:])
+    return ip
+
+
 def _is_public_ip_address(address: str) -> bool:
     try:
         ip = ipaddress.ip_address(address)
     except ValueError:
         return False
-    return ip.is_global
+    return _unwrap_ip_address(ip).is_global
 
 
 def _is_literal_ip_address(hostname: str) -> bool:
@@ -134,6 +164,28 @@ def _is_literal_ip_address(hostname: str) -> bool:
     except ValueError:
         return False
     return True
+
+
+# Wildcard-DNS providers whose hostnames resolve to an IPv4 address embedded
+# directly in the hostname labels (e.g. "127.0.0.1.nip.io" -> 127.0.0.1).
+# These hostnames are not literal IP addresses, so without this check they
+# would pass the validate-only preflight even though they target an internal
+# host once actually resolved.
+_WILDCARD_DNS_PRIVATE_IP_SUFFIXES = (".nip.io", ".sslip.io")
+
+
+def _extract_wildcard_dns_embedded_ip(hostname: str) -> str | None:
+    lowered = hostname.casefold()
+    for suffix in _WILDCARD_DNS_PRIVATE_IP_SUFFIXES:
+        if not lowered.endswith(suffix):
+            continue
+        remainder = lowered[: -len(suffix)]
+        for candidate in (remainder, remainder.replace("-", ".")):
+            try:
+                return str(ipaddress.IPv4Address(candidate))
+            except ValueError:
+                continue
+    return None
 
 
 def _normalize_hostname_for_network_check(hostname: str, *, index: int) -> str:
@@ -159,7 +211,15 @@ def _looks_like_noncanonical_ipv4(hostname: str) -> bool:
     return hostname.count(".") != 3 or any(part.startswith(("0", "0x", "0X")) and part not in {"0"} for part in hostname.split("."))
 
 
-def _assert_public_http_url(url: str, *, index: int, resolve_dns: bool) -> None:
+def _assert_public_http_url(url: str, *, index: int, resolve_dns: bool) -> list[str]:
+    """Validate a direct http(s) URL.
+
+    When ``resolve_dns`` is True (the fetch path) this resolves the hostname once
+    and returns the list of validated public addresses so the caller can PIN the
+    actual connection to one of them, closing the DNS-rebinding TOCTOU gap. For
+    literal-IP and validate-only paths an empty list is returned (nothing to pin;
+    urllib will connect to the already-validated literal directly).
+    """
     parsed = urlparse(url)
     if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc:
         raise AcquisitionError(f"sources[{index}] url must be a direct http(s) URL.")
@@ -173,15 +233,19 @@ def _assert_public_http_url(url: str, *, index: int, resolve_dns: bool) -> None:
     lowered = hostname.casefold()
     if lowered == "localhost" or lowered.endswith(".localhost"):
         raise AcquisitionError(f"sources[{index}] url resolves to a private or local network host.")
+    if not _is_literal_ip_address(hostname):
+        embedded_ip = _extract_wildcard_dns_embedded_ip(hostname)
+        if embedded_ip is not None and not _is_public_ip_address(embedded_ip):
+            raise AcquisitionError(f"sources[{index}] url resolves to a private or local network host.")
     if _looks_like_noncanonical_ipv4(hostname):
         raise AcquisitionError(f"sources[{index}] url uses a non-canonical IPv4 host form.")
 
     if _is_literal_ip_address(hostname):
         if not _is_public_ip_address(hostname):
             raise AcquisitionError(f"sources[{index}] url resolves to a private or local network host.")
-        return
+        return []
     if not resolve_dns:
-        return
+        return []
 
     try:
         infos = socket.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)
@@ -193,6 +257,7 @@ def _assert_public_http_url(url: str, *, index: int, resolve_dns: bool) -> None:
     blocked = [address for address in addresses if not _is_public_ip_address(address)]
     if blocked:
         raise AcquisitionError(f"sources[{index}] url resolves to a private or local network host.")
+    return addresses
 
 
 def _validate_direct_url(value: Any, *, index: int, resolve_dns: bool = False) -> str:
@@ -206,8 +271,83 @@ class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
         raise urllib.error.HTTPError(newurl, code, "redirects are not followed by direct acquisition", headers, fp)
 
 
+def _reassert_pinned_public(address: str) -> None:
+    """Re-validate the pinned IP is public immediately before connecting.
+
+    Raised as OSError so urllib's do_open wraps it into a URLError (handled by the
+    fetch loop as a normal fetch error) instead of escaping as an uncaught type.
+    """
+    if not _is_public_ip_address(address):
+        raise OSError(f"pinned acquisition address {address!r} failed public re-validation")
+
+
+class _PinnedHTTPConnection(http.client.HTTPConnection):
+    """HTTPConnection that dials a pre-validated pinned IP while keeping the
+    original hostname for the ``Host:`` header (self.host is unchanged)."""
+
+    def __init__(self, host, *args, pinned_ip: str, **kwargs) -> None:
+        super().__init__(host, *args, **kwargs)
+        self._pinned_ip = pinned_ip
+
+    def connect(self) -> None:  # type: ignore[override]
+        _reassert_pinned_public(self._pinned_ip)
+        self.sock = socket.create_connection((self._pinned_ip, self.port), self.timeout, self.source_address)
+        if getattr(self, "_tunnel_host", None):
+            self._tunnel()
+
+
+class _PinnedHTTPSConnection(http.client.HTTPSConnection):
+    """HTTPSConnection that dials a pre-validated pinned IP but performs the TLS
+    handshake (SNI + certificate verification) against the ORIGINAL hostname."""
+
+    def __init__(self, host, *args, pinned_ip: str, **kwargs) -> None:
+        super().__init__(host, *args, **kwargs)
+        self._pinned_ip = pinned_ip
+
+    def connect(self) -> None:  # type: ignore[override]
+        _reassert_pinned_public(self._pinned_ip)
+        sock = socket.create_connection((self._pinned_ip, self.port), self.timeout, self.source_address)
+        # server_hostname is the ORIGINAL host, so SNI and certificate hostname
+        # verification use the real hostname, not the pinned IP. self._context is
+        # a verifying ssl.create_default_context (see _PinnedHTTPSHandler).
+        self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
+
+
+class _PinnedHTTPHandler(urllib.request.HTTPHandler):
+    def __init__(self, pinned_ip: str) -> None:
+        super().__init__()
+        self._pinned_ip = pinned_ip
+
+    def http_open(self, req):  # type: ignore[override]
+        return self.do_open(functools.partial(_PinnedHTTPConnection, pinned_ip=self._pinned_ip), req)
+
+
+class _PinnedHTTPSHandler(urllib.request.HTTPSHandler):
+    def __init__(self, pinned_ip: str) -> None:
+        super().__init__(context=ssl.create_default_context())
+        self._pinned_ip = pinned_ip
+
+    def https_open(self, req):  # type: ignore[override]
+        # Mirror urllib's own HTTPSHandler.https_open: pass only `context=`.
+        # `self._context` (ssl.create_default_context()) already carries
+        # check_hostname=True / verify_mode=CERT_REQUIRED, so certificate and
+        # hostname verification stay on without needing a separate
+        # check_hostname kwarg (which newer CPython versions no longer store
+        # as a handler attribute).
+        return self.do_open(
+            functools.partial(_PinnedHTTPSConnection, pinned_ip=self._pinned_ip),
+            req,
+            context=self._context,
+        )
+
+
 def _safe_urlopen(request: urllib.request.Request, *, timeout: int):
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirectHandler)
+    handlers: list[Any] = [urllib.request.ProxyHandler({}), _NoRedirectHandler]
+    pinned = getattr(request, "_pinned_address", None)
+    if pinned:
+        handlers.append(_PinnedHTTPHandler(pinned))
+        handlers.append(_PinnedHTTPSHandler(pinned))
+    opener = urllib.request.build_opener(*handlers)
     return opener.open(request, timeout=timeout)
 
 
@@ -504,7 +644,7 @@ def fetch_acquisition_manifest(
                 record[field] = source[field]
 
         try:
-            _assert_public_http_url(source["url"], index=index, resolve_dns=True)
+            pinned_addresses = _assert_public_http_url(source["url"], index=index, resolve_dns=True)
         except AcquisitionError as exc:
             record["status"] = "blocked_private_network"
             record["warnings"].append(str(exc))
@@ -512,6 +652,11 @@ def fetch_acquisition_manifest(
             continue
 
         request = urllib.request.Request(source["url"], headers={"User-Agent": "InformationFinanceTrustOS-Acquisition/0.8B"})
+        if pinned_addresses:
+            # Pin the actual connection to a validated public IP so the fetch cannot
+            # be re-pointed at a private address by a second DNS resolution
+            # (DNS-rebinding TOCTOU between validate and connect).
+            setattr(request, "_pinned_address", pinned_addresses[0])
         try:
             with _safe_urlopen(request, timeout=timeout) as response:
                 record["http_status"] = getattr(response, "status", response.getcode())
@@ -575,6 +720,31 @@ def fetch_acquisition_manifest(
     return log_path
 
 
+ABSOLUTE_PATH_WARNING = "absolute_path_requires_allow_absolute_flag"
+
+
+def _manifest_relative_file_path(file_path: str, *, manifest_dir: Path) -> tuple[str, list[str]]:
+    """Relativize a fetched artifact path against the analysis manifest directory.
+
+    The analysis-package loader rejects absolute ``file_path`` entries by default
+    (opt-in via ``--allow-absolute-source-paths``), so emit a manifest-relative
+    path whenever the artifact sits under the manifest's parent directory. Files
+    outside that tree (or on another drive, where ``os.path.relpath`` raises)
+    keep the absolute path unchanged and carry a warning so the operator knows
+    the analysis-package opt-in flag will be required.
+    """
+    try:
+        relative = os.path.relpath(file_path, manifest_dir)
+    except ValueError:
+        # Different drive on Windows: no relative form exists.
+        return file_path, [ABSOLUTE_PATH_WARNING]
+    if relative == ".." or relative.startswith(".." + os.sep) or relative.startswith("../"):
+        # Outside the manifest directory tree: the downstream traversal guard
+        # rejects "..", so the relative form would be unusable.
+        return file_path, [ABSOLUTE_PATH_WARNING]
+    return relative.replace(os.sep, "/"), []
+
+
 def acquisition_log_to_analysis_manifest(
     *,
     acquisition_log_file: str | Path,
@@ -599,13 +769,16 @@ def acquisition_log_to_analysis_manifest(
     if not successful_records:
         raise AcquisitionError("Acquisition log has no fetched records eligible for analysis manifest conversion.")
 
+    output = Path(output_path)
+    manifest_dir = output.resolve().parent
     sources: list[dict] = []
     for record in sorted(successful_records, key=lambda item: (str(item.get("source_name") or "").casefold(), str(item.get("file_path") or ""))):
+        manifest_file_path, path_warnings = _manifest_relative_file_path(str(record["file_path"]), manifest_dir=manifest_dir)
         source = {
             "source_name": record["source_name"],
             "source_type": record["source_type"],
             "mode": record["mode"],
-            "file_path": record["file_path"],
+            "file_path": manifest_file_path,
             "source_url": record["source_url"],
             "captured_at": record["fetched_at"],
             "acquisition_method": DIRECT_URL_ACQUISITION_METHOD,
@@ -616,6 +789,8 @@ def acquisition_log_to_analysis_manifest(
                 source[field] = record[field]
         if record.get("citation_note"):
             source["citation_note"] = f"{record['citation_note']} | {source['citation_note']}"
+        if path_warnings:
+            source["warnings"] = path_warnings
         sources.append(source)
 
     manifest = {
@@ -623,6 +798,5 @@ def acquisition_log_to_analysis_manifest(
         "analysis_request": "Analyze reviewed local artifacts produced by the direct URL acquisition lane. Acquisition metadata is not source-truth verification.",
         "sources": sources,
     }
-    output = Path(output_path)
     write_json(output, manifest)
     return output

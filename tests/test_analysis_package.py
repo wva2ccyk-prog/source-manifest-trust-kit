@@ -60,7 +60,7 @@ def _manifest(tmp_path: Path) -> Path:
 
 def test_analysis_package_manifest_generates_operator_artifacts_and_source_index(tmp_path):
     manifest_path = _manifest(tmp_path)
-    package_dir = build_analysis_package_from_manifest(source_manifest=manifest_path, output_root=tmp_path / "out")
+    package_dir = build_analysis_package_from_manifest(source_manifest=manifest_path, output_root=tmp_path / "out", allow_absolute=True)
     package_index = json.loads((package_dir / "PACKAGE_INDEX.json").read_text(encoding="utf-8"))
     assert (package_dir / "final_operator_package.md").exists()
     assert Path(package_index["analysis_source_manifest"]).exists()
@@ -103,7 +103,7 @@ def test_analysis_package_rejects_url_like_file_path(tmp_path):
 
 def test_analysis_package_operator_outputs_mask_unsafe_finance_text(tmp_path):
     manifest_path = _manifest(tmp_path)
-    package_dir = build_analysis_package_from_manifest(source_manifest=manifest_path, output_root=tmp_path / "out")
+    package_dir = build_analysis_package_from_manifest(source_manifest=manifest_path, output_root=tmp_path / "out", allow_absolute=True)
     package_index = json.loads((package_dir / "PACKAGE_INDEX.json").read_text(encoding="utf-8"))
     paths = [
         package_dir / "final_operator_package.md",
@@ -144,7 +144,7 @@ def test_analysis_package_masks_allocation_return_projection(tmp_path):
         ),
         encoding="utf-8",
     )
-    package_dir = build_analysis_package_from_manifest(source_manifest=manifest_path, output_root=tmp_path / "out")
+    package_dir = build_analysis_package_from_manifest(source_manifest=manifest_path, output_root=tmp_path / "out", allow_absolute=True)
     package_index = json.loads((package_dir / "PACKAGE_INDEX.json").read_text(encoding="utf-8"))
     paths = [
         package_dir / "final_operator_package.md",
@@ -179,7 +179,7 @@ def test_analysis_package_masks_investment_rating_language(tmp_path):
         ),
         encoding="utf-8",
     )
-    package_dir = build_analysis_package_from_manifest(source_manifest=manifest_path, output_root=tmp_path / "out")
+    package_dir = build_analysis_package_from_manifest(source_manifest=manifest_path, output_root=tmp_path / "out", allow_absolute=True)
     package_index = json.loads((package_dir / "PACKAGE_INDEX.json").read_text(encoding="utf-8"))
     paths = [
         package_dir / "final_operator_package.md",
@@ -215,7 +215,7 @@ def test_analysis_package_masks_korean_community_investment_action_language(tmp_
         ),
         encoding="utf-8",
     )
-    package_dir = build_analysis_package_from_manifest(source_manifest=manifest_path, output_root=tmp_path / "out")
+    package_dir = build_analysis_package_from_manifest(source_manifest=manifest_path, output_root=tmp_path / "out", allow_absolute=True)
     package_index = json.loads((package_dir / "PACKAGE_INDEX.json").read_text(encoding="utf-8"))
     paths = [
         package_dir / "final_operator_package.md",
@@ -243,6 +243,7 @@ def test_cli_analysis_package(tmp_path):
             str(manifest_path),
             "--output-root",
             str(tmp_path / "cli_out"),
+            "--allow-absolute-source-paths",
         ],
         cwd=Path(__file__).resolve().parents[1],
         text=True,
@@ -251,6 +252,28 @@ def test_cli_analysis_package(tmp_path):
     assert result.returncode == 0, result.stderr
     assert (tmp_path / "cli_out" / "operator_package" / "final_operator_package.md").exists()
     assert (tmp_path / "cli_out" / "analysis_source_index.md").exists()
+
+
+def test_cli_analysis_package_rejects_absolute_paths_without_flag(tmp_path):
+    manifest_path = _manifest(tmp_path)
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "source_manifest_kit",
+            "analysis-package",
+            "--source-manifest",
+            str(manifest_path),
+            "--output-root",
+            str(tmp_path / "cli_out_rejected"),
+        ],
+        cwd=Path(__file__).resolve().parents[1],
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode == 2
+    assert "absolute path" in result.stderr
+    assert "Traceback" not in result.stderr
 
 
 def test_analysis_package_escapes_source_url_metadata_for_markdown(tmp_path):
@@ -274,7 +297,7 @@ def test_analysis_package_escapes_source_url_metadata_for_markdown(tmp_path):
         ),
         encoding="utf-8",
     )
-    package_dir = build_analysis_package_from_manifest(source_manifest=manifest_path, output_root=tmp_path / "out")
+    package_dir = build_analysis_package_from_manifest(source_manifest=manifest_path, output_root=tmp_path / "out", allow_absolute=True)
     package_index = json.loads((package_dir / "PACKAGE_INDEX.json").read_text(encoding="utf-8"))
     source_index = Path(package_index["analysis_source_index"]).read_text(encoding="utf-8")
     assert "\\[click\\]\\(javascript:alert\\(1\\)\\)" in source_index
@@ -327,7 +350,7 @@ def test_analysis_package_rejects_empty_sources_duplicate_names_and_relative_tra
         encoding="utf-8",
     )
     with pytest.raises(AnalysisManifestError, match="duplicate source_name"):
-        build_analysis_package_from_manifest(source_manifest=duplicate_manifest, output_root=tmp_path / "duplicate_out")
+        build_analysis_package_from_manifest(source_manifest=duplicate_manifest, output_root=tmp_path / "duplicate_out", allow_absolute=True)
 
     outside = tmp_path / "outside.txt"
     _write(outside, "The city announced a meeting schedule.")
@@ -351,12 +374,13 @@ def test_analysis_package_rejects_empty_sources_duplicate_names_and_relative_tra
 
 def test_analysis_package_compare_before_issue_dir_generates_comparison(tmp_path):
     manifest_path = _manifest(tmp_path)
-    before_package = build_analysis_package_from_manifest(source_manifest=manifest_path, output_root=tmp_path / "before")
+    before_package = build_analysis_package_from_manifest(source_manifest=manifest_path, output_root=tmp_path / "before", allow_absolute=True)
     before_index = json.loads((before_package / "PACKAGE_INDEX.json").read_text(encoding="utf-8"))
     after_package = build_analysis_package_from_manifest(
         source_manifest=manifest_path,
         output_root=tmp_path / "after",
         compare_before_issue_dir=before_index["issue_dir"],
+        allow_absolute=True,
     )
     after_index = json.loads((after_package / "PACKAGE_INDEX.json").read_text(encoding="utf-8"))
     assert after_index["comparison_summary"]
@@ -384,8 +408,82 @@ def test_analysis_source_index_guides_missing_community_citation_note(tmp_path):
         ),
         encoding="utf-8",
     )
-    package_dir = build_analysis_package_from_manifest(source_manifest=manifest_path, output_root=tmp_path / "out")
+    package_dir = build_analysis_package_from_manifest(source_manifest=manifest_path, output_root=tmp_path / "out", allow_absolute=True)
     package_index = json.loads((package_dir / "PACKAGE_INDEX.json").read_text(encoding="utf-8"))
     source_index = Path(package_index["analysis_source_index"]).read_text(encoding="utf-8")
     assert "Citation note guidance: add provenance" in source_index
     assert "do not upgrade any claim" in source_index
+
+
+def test_analysis_package_rejects_absolute_file_path_by_default(tmp_path):
+    source = tmp_path / "source.txt"
+    _write(source, "The city announced a meeting schedule.")
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "issue_id": "absolute_default_reject",
+                "sources": [
+                    {
+                        "source_name": "news",
+                        "source_type": "news",
+                        "mode": "general",
+                        "file_path": str(source),
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(AnalysisManifestError, match="absolute path"):
+        build_analysis_package_from_manifest(source_manifest=manifest_path, output_root=tmp_path / "out")
+
+
+def test_analysis_package_allow_absolute_flag_permits_absolute_file_path(tmp_path):
+    source = tmp_path / "source.txt"
+    _write(source, "The city announced a meeting schedule.")
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "issue_id": "absolute_allowed",
+                "sources": [
+                    {
+                        "source_name": "news",
+                        "source_type": "news",
+                        "mode": "general",
+                        "file_path": str(source),
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    package_dir = build_analysis_package_from_manifest(
+        source_manifest=manifest_path, output_root=tmp_path / "out", allow_absolute=True
+    )
+    assert (package_dir / "final_operator_package.md").exists()
+
+
+def test_analysis_package_relative_file_path_still_works_without_opt_in(tmp_path):
+    sources = tmp_path / "sources"
+    _write(sources / "news.txt", "The city announced a meeting schedule.")
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "issue_id": "relative_no_opt_in",
+                "sources": [
+                    {
+                        "source_name": "news",
+                        "source_type": "news",
+                        "mode": "general",
+                        "file_path": "sources/news.txt",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    package_dir = build_analysis_package_from_manifest(source_manifest=manifest_path, output_root=tmp_path / "out")
+    assert (package_dir / "final_operator_package.md").exists()

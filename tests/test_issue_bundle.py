@@ -249,6 +249,110 @@ def test_bundle_summary_defensively_masks_general_mode_finance_language(tmp_path
     assert "[blocked-investment-action]" in summary
 
 
+def test_bundle_summary_escapes_markdown_injection(tmp_path):
+    # FIX 1: untrusted claim text is escaped through the single masking gate so an
+    # injected markdown link / raw HTML tag renders literally, not as active markup.
+    s1 = tmp_path / "samples" / "injection.txt"
+    _write(
+        s1,
+        "The vendor notice included a link [x](http://evil) and embedded <script>alert(1)</script> in the body.",
+    )
+    bundle_path = tmp_path / "bundle.json"
+    bundle_data = {
+        "issue_id": "issue_bundle_markdown_injection",
+        "sources": [
+            {"source_name": "wire", "source_type": "news", "mode": "general", "file_path": str(s1)},
+        ],
+    }
+    bundle_path.write_text(json.dumps(bundle_data), encoding="utf-8")
+    issue_dir = run_issue_bundle(bundle_file=bundle_path, output_root=tmp_path, report_profile="operator", allow_absolute_paths=True)
+    summary = (issue_dir / "bundle_operator_summary.md").read_text(encoding="utf-8")
+    assert "\\[x\\]" in summary
+    assert "[x](http://evil)" not in summary
+    assert "&lt;script&gt;" in summary
+    assert "<script>" not in summary
+
+
+def test_cross_source_repetition_flags_news_and_community_dup(tmp_path):
+    # FIX 2: identical text repeated across DIFFERENT source types (news + community)
+    # is grouped and flagged as repetition-without-lineage; the old detector only
+    # keyed community/social and missed the news+repost laundering case.
+    verbatim = "The mayor confirmed the bridge will reopen on Tuesday morning."
+    news = tmp_path / "samples" / "news.txt"
+    community = tmp_path / "samples" / "community.txt"
+    _write(news, verbatim)
+    _write(community, verbatim)
+    bundle_path = tmp_path / "bundle.json"
+    bundle_data = {
+        "issue_id": "issue_bundle_cross_source_laundering",
+        "sources": [
+            {"source_name": "news_wire", "source_type": "news", "mode": "general", "file_path": str(news)},
+            {"source_name": "community_repost", "source_type": "community", "mode": "general", "file_path": str(community)},
+        ],
+    }
+    bundle_path.write_text(json.dumps(bundle_data), encoding="utf-8")
+    issue_dir = run_issue_bundle(bundle_file=bundle_path, output_root=tmp_path, report_profile="operator", allow_absolute_paths=True)
+    duplicate_json = json.loads((issue_dir / "bundle_cross_run_duplicates.json").read_text(encoding="utf-8"))
+    assert duplicate_json["groups"]
+    group = duplicate_json["groups"][0]
+    assert group["source_count"] >= 2
+    assert set(group["sources"]) == {"news_wire", "community_repost"}
+    summary = (issue_dir / "bundle_operator_summary.md").read_text(encoding="utf-8").lower()
+    assert "cross-source repeated claim group" in summary
+    assert "not independent corroboration" in summary
+
+
+def test_bundle_summary_includes_medium_reported_claim_catch_all(tmp_path):
+    # FIX 3: a reported_claim forced to risk_tier medium (strong-certainty flag) is
+    # neither low-risk nor weak nor rumor, and was silently dropped by the summary.
+    # The catch-all bucket now surfaces it.
+    s1 = tmp_path / "samples" / "merger.txt"
+    _write(s1, "Sources say the merger is guaranteed to close and will certainly double revenue.")
+    bundle_path = tmp_path / "bundle.json"
+    bundle_data = {
+        "issue_id": "issue_bundle_medium_catch_all",
+        "sources": [
+            {"source_name": "wire", "source_type": "news", "mode": "general", "file_path": str(s1)},
+        ],
+    }
+    bundle_path.write_text(json.dumps(bundle_data), encoding="utf-8")
+    issue_dir = run_issue_bundle(bundle_file=bundle_path, output_root=tmp_path, report_profile="operator", allow_absolute_paths=True)
+    summary = (issue_dir / "bundle_operator_summary.md").read_text(encoding="utf-8").lower()
+    assert "## other reported claims needing review" in summary
+    catch_all_start = summary.index("## other reported claims needing review")
+    rumor_start = summary.index("## rumor / social / manipulation-framing claims")
+    catch_all_block = summary[catch_all_start:rumor_start]
+    assert "the merger is guaranteed to close" in catch_all_block
+    assert "risk: medium" in catch_all_block
+
+
+def test_bundle_summary_flags_korean_financial_figure_divergence(tmp_path):
+    # FIX 4: divergent Korean 조/억/만/원 figures for the same metric context are
+    # detected language-agnostically, while an unrelated figure (share price) with a
+    # different context does not falsely group.
+    files = {
+        "wire_a": "회사의 올해 예상 매출은 12조 3,000억원이다.",
+        "wire_b": "회사의 올해 예상 매출은 18조원이다.",
+        "analyst_c": "회사의 올해 예상 매출은 25조원이다.",
+        "unrelated_d": "그 회사의 주가는 5만원까지 올랐다.",
+    }
+    sources = []
+    for name, text in files.items():
+        path = tmp_path / "samples" / f"{name}.txt"
+        _write(path, text)
+        sources.append({"source_name": name, "source_type": "news", "mode": "general", "file_path": str(path)})
+    bundle_path = tmp_path / "bundle.json"
+    bundle_path.write_text(json.dumps({"issue_id": "issue_bundle_korean_divergence", "sources": sources}), encoding="utf-8")
+    issue_dir = run_issue_bundle(bundle_file=bundle_path, output_root=tmp_path, report_profile="operator", allow_absolute_paths=True)
+    numeric_conflicts = json.loads((issue_dir / "bundle_numeric_conflicts.json").read_text(encoding="utf-8"))
+    assert len(numeric_conflicts["conflicts"]) == 1
+    conflict = numeric_conflicts["conflicts"][0]
+    assert set(conflict["sources"]) == {"wire_a", "wire_b", "analyst_c"}
+    assert "unrelated_d" not in conflict["sources"]
+    assert set(conflict["values"]) == {"12조 3,000억원", "18조원", "25조원"}
+    summary = (issue_dir / "bundle_operator_summary.md").read_text(encoding="utf-8").lower()
+    assert "numeric divergence requires review" in summary
+
 
 def test_bundle_run_rejects_relative_path_traversal_by_default(tmp_path):
     outside = tmp_path / "outside.txt"

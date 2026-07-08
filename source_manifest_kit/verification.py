@@ -2,24 +2,41 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 
 from .bundle import _collect_bundle_records, _safe_claim_text_for_output
-from .core.risk_policy import sanitize_for_report
+from .core.risk_policy import escape_markdown_inline, sanitize_for_report
 from .ledger.jsonl import write_json
 
 
 def _packet_id(issue_id: str, claim: dict, category: str) -> str:
-    seed = "|".join(
-        [
-            issue_id,
-            str(claim.get("bundle_run_id") or claim.get("run_id") or ""),
-            str(claim.get("claim_id") or ""),
-            category,
-            str(claim.get("normalized_claim_hash") or ""),
-        ]
-    )
+    # FIX 5: seed with STABLE content only — issue_id + category + the claim's
+    # normalized hash (falling back to normalized claim text). The former seed
+    # mixed in bundle_run_id/run_id, which carries a fresh timestamp per run, so
+    # every id churned between identical reruns. Within-packet uniqueness for
+    # claims that share a hash is handled by _dedupe_packet_ids after building.
+    normalized_hash = str(claim.get("normalized_claim_hash") or "")
+    if not normalized_hash:
+        normalized_hash = re.sub(r"\s+", " ", str(claim.get("claim_text") or "").lower()).strip()
+    seed = "|".join([issue_id, category, normalized_hash])
     return "vreq_" + hashlib.sha256(seed.encode("utf-8")).hexdigest()[:16]
+
+
+def _dedupe_packet_ids(packets: list[dict]) -> None:
+    """Make packet_ids unique within a packet without reintroducing run state.
+
+    Two distinct claims can share a normalized hash + category (identical text),
+    which now yields the same base id. Append a deterministic positional suffix so
+    they stay distinct; ordering is stable across identical reruns.
+    """
+    seen: dict[str, int] = {}
+    for entry in packets:
+        base = entry["packet_id"]
+        count = seen.get(base, 0) + 1
+        seen[base] = count
+        if count > 1:
+            entry["packet_id"] = f"{base}_{count}"
 
 
 def _category_for_claim(claim: dict) -> str:
@@ -65,10 +82,14 @@ def _official_query(claim: dict) -> str:
 
 
 def _safe_claim_text(claim: dict) -> str:
+    # Single masking gate: excluded -> placeholder, else sanitize by run mode.
+    # Escape untrusted claim text FIRST, then sanitize, matching the bundle gate,
+    # so injected markdown/HTML renders literally. The excluded branch routes
+    # through _safe_claim_text_for_output, which already escapes.
     if claim.get("claim_type") == "excluded":
         return _safe_claim_text_for_output(claim)
     mode = "finance" if claim.get("source_mode") == "finance" else "general"
-    return sanitize_for_report(claim.get("claim_text", ""), mode)
+    return sanitize_for_report(escape_markdown_inline(claim.get("claim_text", "")), mode)
 
 
 def _claim_ref(claim: dict) -> str:
@@ -249,6 +270,7 @@ def build_verification_packet(*, issue_dir: str | Path, output_dir: str | Path |
         )
         for claim in claims
     ]
+    _dedupe_packet_ids(packets)
     raw_must = _items_by_tier({"packets": packets}, "must_verify")
     raw_nice = _items_by_tier({"packets": packets}, "nice_to_verify")
     raw_unsafe = _items_by_tier({"packets": packets}, "unsafe_to_conclude")

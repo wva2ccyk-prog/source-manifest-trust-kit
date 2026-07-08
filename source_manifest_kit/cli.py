@@ -168,6 +168,7 @@ def cmd_analysis_package(args: argparse.Namespace) -> None:
         output_root=args.output_root,
         compare_before_issue_dir=args.compare_before_issue_dir,
         excluded_detail_mode=args.excluded_detail_mode,
+        allow_absolute=args.allow_absolute_source_paths,
     )
     print(f"Operator package directory: {package_dir}")
     print(f"Analysis source index: {Path(args.output_root) / 'analysis_source_index.md'}")
@@ -289,6 +290,28 @@ def cmd_llm_review_adapter(args: argparse.Namespace) -> None:
         print("External call performed: false")
 
 
+def cmd_eval_goldset(args: argparse.Namespace) -> None:
+    # Imported lazily so the rest of the CLI keeps working even before
+    # source_manifest_kit/evaluation.py and its goldset fixture exist
+    # (both are produced by a parallel in-flight change).
+    from . import evaluation
+
+    goldset_path = Path(args.goldset)
+    output_dir = Path(args.output_dir) if args.output_dir else goldset_path.resolve().parent
+    cases = evaluation.load_goldset(goldset_path)
+    report = evaluation.evaluate_goldset(cases)
+    paths = evaluation.write_evaluation_report(report, output_dir)
+    print(f"Evaluation report: {paths['json']}")
+    print(f"Evaluation report markdown: {paths['markdown']}")
+    enforced = report.get("enforced", {})
+    print(f"Enforced: {enforced.get('passing', 0)}/{enforced.get('total', 0)} passing")
+    if args.enforce and enforced.get("failing", 0):
+        print("Enforced gold cases failing:", file=sys.stderr)
+        for entry in enforced.get("failing_cases", []):
+            print(f"- {entry.get('case_id')}: {entry.get('reason')}", file=sys.stderr)
+        raise SystemExit(2)
+
+
 def cmd_llm_review_validate_response(args: argparse.Namespace) -> None:
     validation_path = validate_external_review_response(
         packet_file=args.packet_file,
@@ -400,6 +423,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_analysis_package.add_argument("--output-root", required=True)
     p_analysis_package.add_argument("--compare-before-issue-dir")
     p_analysis_package.add_argument("--excluded-detail-mode", choices=["default", "detailed"], default="detailed")
+    p_analysis_package.add_argument(
+        "--allow-absolute-source-paths",
+        action="store_true",
+        help="Allow absolute file_path values in the source manifest (trusted local use only; default rejects absolute paths).",
+    )
     p_analysis_package.set_defaults(func=cmd_analysis_package)
     p_capture_source = sub.add_parser("capture-source", help="Capture operator-provided local text into a source file and capture log")
     p_capture_source.add_argument("--workspace", required=True)
@@ -474,6 +502,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_validate_review.add_argument("--response-file", required=True)
     p_validate_review.add_argument("--output-dir")
     p_validate_review.set_defaults(func=cmd_llm_review_validate_response)
+    p_eval_goldset = sub.add_parser("eval-goldset", help="Run deterministic detectors against a gold set JSONL and write eval_report.json/.md")
+    p_eval_goldset.add_argument("--goldset", required=True, help="Local gold set JSONL file")
+    p_eval_goldset.add_argument("--output-dir", help="Defaults to the goldset file's parent directory")
+    p_eval_goldset.add_argument(
+        "--enforce",
+        action="store_true",
+        help="Exit nonzero if any enforced-status gold case fails",
+    )
+    p_eval_goldset.set_defaults(func=cmd_eval_goldset)
     return parser
 
 

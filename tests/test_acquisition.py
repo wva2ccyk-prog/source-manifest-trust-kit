@@ -177,6 +177,29 @@ def test_acquisition_fetch_rejects_non_text_and_size_limited_records_from_conver
         )
 
 
+def test_acquisition_log_to_analysis_manifest_emits_relative_file_paths(tmp_path, monkeypatch):
+    _allow_example_invalid_dns(monkeypatch)
+    manifest = _write_manifest(tmp_path / "manifest.json", [_source()])
+
+    def _urlopen(request, timeout):
+        return _FakeResponse(b"The exchange posted a notice.", content_type="text/plain")
+
+    monkeypatch.setattr("source_manifest_kit.acquisition._safe_urlopen", _urlopen)
+    log_path = fetch_acquisition_manifest(manifest_file=manifest, output_root=tmp_path / "acquired")
+    analysis_manifest_path = acquisition_log_to_analysis_manifest(
+        acquisition_log_file=log_path,
+        output_path=tmp_path / "analysis_sources.json",
+        confirm_reviewed=True,
+    )
+    analysis_manifest = json.loads(analysis_manifest_path.read_text(encoding="utf-8"))
+    source = analysis_manifest["sources"][0]
+    assert not Path(source["file_path"]).is_absolute()
+    assert "warnings" not in source
+    # analysis-package must consume the relative path without any absolute-path opt-in.
+    package_dir = build_analysis_package_from_manifest(source_manifest=analysis_manifest_path, output_root=tmp_path / "package")
+    assert (package_dir / "final_operator_package.md").exists()
+
+
 def test_acquisition_fetch_extracts_html_visible_text_and_preserves_raw_html(tmp_path, monkeypatch):
     _allow_example_invalid_dns(monkeypatch)
     manifest = _write_manifest(tmp_path / "manifest.json", [_source(source_name="html_page", url="https://example.invalid/html")])
@@ -293,3 +316,59 @@ def test_cli_acquisition_invalid_port_returns_clean_error(tmp_path):
     assert result.returncode == 2
     assert "invalid port" in result.stderr
     assert "Traceback" not in result.stderr
+
+
+def test_acquisition_manifest_rejects_wildcard_dns_embedded_private_ip(tmp_path):
+    nip_io = _write_manifest(tmp_path / "nip_io.json", [_source(url="http://127.0.0.1.nip.io/status")])
+    with pytest.raises(AcquisitionError, match="private or local network"):
+        load_acquisition_manifest(nip_io)
+
+    sslip_io_dashed = _write_manifest(tmp_path / "sslip_io.json", [_source(url="http://10-0-0-1.sslip.io/status")])
+    with pytest.raises(AcquisitionError, match="private or local network"):
+        load_acquisition_manifest(sslip_io_dashed)
+
+    # A wildcard-DNS host whose embedded address is public is not blocked by this check.
+    public_nip_io = _write_manifest(tmp_path / "public_nip_io.json", [_source(url="http://93.184.216.34.nip.io/status")])
+    load_acquisition_manifest(public_nip_io)
+
+
+def test_acquisition_manifest_rejects_ipv4_compatible_ipv6_loopback(tmp_path):
+    manifest = _write_manifest(tmp_path / "ipv4_compatible.json", [_source(url="http://[::127.0.0.1]/status")])
+    with pytest.raises(AcquisitionError, match="private or local network"):
+        load_acquisition_manifest(manifest)
+
+
+def test_acquisition_manifest_still_validates_ordinary_public_url(tmp_path):
+    manifest = _write_manifest(tmp_path / "public.json", [_source(url="https://example.com/article")])
+    normalized = load_acquisition_manifest(manifest)
+    assert normalized["sources"][0]["url"] == "https://example.com/article"
+
+
+def test_acquisition_fetch_pins_connection_to_validated_address(tmp_path, monkeypatch):
+    manifest = _write_manifest(tmp_path / "manifest.json", [_source(url="https://example.invalid/status")])
+
+    getaddrinfo_calls = []
+
+    def _fake_getaddrinfo(host, port, *args, **kwargs):
+        getaddrinfo_calls.append((host, port))
+        assert host.endswith("example.invalid")
+        return [(2, 1, 6, "", ("93.184.216.34", port))]
+
+    monkeypatch.setattr("source_manifest_kit.acquisition.socket.getaddrinfo", _fake_getaddrinfo)
+
+    connect_calls = []
+
+    def _fake_create_connection(address, *args, **kwargs):
+        connect_calls.append(address)
+        raise OSError("no real network access in test")
+
+    monkeypatch.setattr("source_manifest_kit.acquisition.socket.create_connection", _fake_create_connection)
+
+    log_path = fetch_acquisition_manifest(manifest_file=manifest, output_root=tmp_path / "acquired")
+    log = json.loads(log_path.read_text(encoding="utf-8"))
+    assert log["records"][0]["status"] == "fetch_error"
+    # The connection dialed the address resolved during the pre-flight check, not a
+    # fresh hostname resolution performed by urllib/http.client at connect time -
+    # a second resolution there would reopen the DNS-rebinding TOCTOU window.
+    assert connect_calls == [("93.184.216.34", 443)]
+    assert len(getaddrinfo_calls) == 1

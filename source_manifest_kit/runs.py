@@ -75,7 +75,9 @@ def analyze_file(*, mode: str, input_path: str | Path, source_name: str, source_
     ledger_dir = run_dir / "ledger"
     input_dir.mkdir(parents=True, exist_ok=True)
     ledger_dir.mkdir(parents=True, exist_ok=True)
-    text = input_file.read_text(encoding="utf-8")
+    # utf-8-sig strips a leading UTF-8 BOM (common when files are saved with
+    # Windows Notepad) so it never gets glued onto the first extracted claim.
+    text = input_file.read_text(encoding="utf-8-sig")
     (input_dir / "source_001.txt").write_text(text, encoding="utf-8")
     stype = safe_source_type(source_type)
     source = SourceRecord("src_001", run_id, stype, source_name, source_url, title or input_file.name, published_at, utc_now(), _observable_state(stype), "input/source_001.txt")

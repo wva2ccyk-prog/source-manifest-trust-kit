@@ -72,9 +72,42 @@ Public alpha candidate, pending the release gate (python -m pytest -q and python
 
 It is not a fact checker, not truth verification, not RAG evaluation, and not finance or investment guidance. Run the full test suite and review `docs/THREAT_MODEL.md` before relying on it. A Codex-for-OSS submission remains future-only until public repository evidence exists.
 
+## Evaluation Gold Set
+
+`evaluation/goldset_v1.jsonl` is a hand-authored, provider-neutral evaluation set
+for the deterministic keyword/regex trust classifier (`core/risk_policy.py` +
+`core/classification.py`). Each line is a realistic Korean/English/mixed sentence
+plus the **policy-correct** labels for the eight detectors, the acceptable claim
+type/tier, and masking expectations. It is data, not code; see
+`evaluation/GOLDSET_GUIDE.md` for the schema and labeling rules.
+
+Every case carries a `status`:
+
+- **`enforced`** — the current system already produces every labeled aspect. These
+  are regression guards: a code change that breaks one flips the case to failing.
+- **`aspirational`** — the label is the correct policy, but the current system does
+  not yet meet it. These document known gaps and must NOT be "fixed" by weakening
+  the label.
+
+The harness lives in `source_manifest_kit/evaluation.py`
+(`load_goldset`, `evaluate_goldset`, `evaluate_case`, `write_evaluation_report`).
+It reports per-detector precision/recall/F1, per-language breakdowns, claim-type
+and tier accuracy, masking violations, and the enforced/aspirational split. The
+acceptance contract for this classifier is **zero enforced-case failures and all
+eight detector precisions == 1.000** (validated in `tests/test_evaluation.py`).
+
+The `eval-goldset` command (measurement by default; `--enforce` to exit non-zero
+on any enforced regression) surfaces this from the CLI:
+
+```bash
+python -m source_manifest_kit eval-goldset --goldset evaluation/goldset_v1.jsonl --output-dir eval_out
+python -m source_manifest_kit eval-goldset --goldset evaluation/goldset_v1.jsonl --output-dir eval_out --enforce
+```
+
 ## Repository Layout
 
 - `source_manifest_kit/`: Python CLI and deterministic analysis runtime.
+- `evaluation/`: provider-neutral trust-classifier gold set (`goldset_v1.jsonl`) and its labeling guide.
 - `examples/`: synthetic source manifest and sample source files.
 - `tests/`: deterministic tests copied from the private baseline for package review.
 - `docs/WHY.md`: rationale and design intent.

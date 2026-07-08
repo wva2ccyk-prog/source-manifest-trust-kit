@@ -49,3 +49,9 @@ analysis_source_index.md
 Thumbs.db
 .idea/
 .vscode/
+# Generated evaluation reports
+evaluation/eval_report.json
+evaluation/eval_report.md
+
+# Evaluation gold set is source data, not a runtime ledger — keep it tracked
+!evaluation/goldset_v1.jsonl
