@@ -9,11 +9,10 @@ acquisition, risk-policy, LLM-review, CLI, and frontend surfaces.
 This document records what was verified as accurate, what was found to be wrong
 or stale, and a prioritized fix plan. It does not change runtime behavior.
 
-**Status:** eight of nine findings are fixed in the follow-up branch
-`fix/p1-vendored-sanitizer-and-release-gate`. Only F4 remains open, because
-tagging and publishing a release is an owner decision; it has a step-by-step
-runbook at `docs/OPEN_FOLLOWUP_F4_RELEASE_TAGGING.md`. Per-finding status is noted
-inline below.
+**Status: all nine findings resolved.** F1–F3 and F5–F9 were fixed in PR #3, and
+F4 was resolved by cutting `v0.2.0` from `main` rather than tagging the historical
+`0.1.1` tree; see `docs/RELEASE_TAGGING.md` for that decision and the reusable
+release procedure. Per-finding status is noted inline below.
 
 ## Verified accurate
 
@@ -137,12 +136,13 @@ re-vendor cannot silently regress. Keep it stdlib-only and offline.
 
 ### F4 — `CHANGELOG.md` points at a release and tag that do not exist (P2)
 
-**Status: open, owner decision — runbook written.** Creating a tag and cutting a
-release is a publishing action, so it is left to the owner rather than performed as
-part of a review. `docs/OPEN_FOLLOWUP_F4_RELEASE_TAGGING.md` makes it executable
-without re-deriving anything: the two options and their trade-offs, the verified
-target commit (`0231593`), exact commands, draft release notes, verification steps,
-and the failure modes to avoid.
+**Status: resolved in `v0.2.0`.** `v0.1.1` was deliberately not tagged. Tagging the
+historical `0231593` tree would have repaired two dead links at the cost of
+publishing a downloadable release shipping DOMPurify `3.0.9` (CVE-2024-47875), and
+a release page is the first thing most people click. Instead the `[0.1.1]`
+changelog entry is marked as an untagged historical record with its dead links
+removed, and `v0.2.0` is the first tagged release, cut from a `main` that has the
+sanitizer upgraded and the release gate passing. See `docs/RELEASE_TAGGING.md`.
 
 `CHANGELOG.md` documents a `[0.1.1] - 2026-06-30` entry and links to
 `releases/tag/v0.1.1` and `compare/v0.1.1...HEAD`. On the remote there are **no
@@ -257,7 +257,7 @@ use a forward slash in prose.
 | 1 | F2 upgrade vendored DOMPurify past CVE-2024-47875 | P1 | Security | fixed |
 | 2 | F3 add vendored-asset version-floor test | P1 | Process | fixed |
 | 3 | F1 make `release_check.py` pass after the documented install | P1 | Blocking | fixed |
-| 4 | F4 tag `v0.1.1` and cut the release the changelog links to | P2 | Accuracy | open |
+| 4 | F4 make the changelog's release links true | P2 | Accuracy | fixed |
 | 5 | F5 changelog entries for the hardening commit | P2 | Accuracy | fixed |
 | 6 | F6 roadmap status correction | P2 | Accuracy | fixed |
 | 7 | F7 acquisition boundary metadata reflects the DNS check performed | P3 | Correctness | fixed |
@@ -266,9 +266,8 @@ use a forward slash in prose.
 
 F1–F3 were the release blockers: two were the difference between a documented
 gate that passes and one that cannot, and the third was a known-vulnerable
-sanitizer on the untrusted-input path. All three are fixed. F4 is the only item
-left, and it gates the public-release evidence `docs/PUBLIC_READINESS.md` asks
-for; see `docs/OPEN_FOLLOWUP_F4_RELEASE_TAGGING.md` to execute it.
+sanitizer on the untrusted-input path. All are now closed, and the `v0.2.0`
+release supplies the public-release evidence `docs/PUBLIC_READINESS.md` asks for.
 
 ## Out of scope for this review
 
