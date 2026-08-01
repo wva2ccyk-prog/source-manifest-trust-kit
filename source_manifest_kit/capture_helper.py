@@ -17,6 +17,7 @@ from .analysis_package import (
     _safe_metadata,
     _safe_slug,
 )
+from .core.text_io import read_source_text
 from .ledger.jsonl import write_json
 
 
@@ -154,10 +155,12 @@ def capture_source(
         source_path = Path(raw_input)
         if not source_path.is_file():
             raise CaptureError(f"input_text_file not found: {source_path}")
-        # utf-8-sig strips a leading UTF-8 BOM (common when operator source
-        # files are saved with Windows Notepad) so it never gets glued onto
-        # the first captured claim.
-        raw_text = source_path.read_text(encoding="utf-8-sig")
+        try:
+            raw_text = read_source_text(source_path, label="input_text_file")
+        except ValueError as exc:
+            # Keep this lane's own error type so callers catching CaptureError
+            # continue to work; the message already names file, byte, and fix.
+            raise CaptureError(str(exc)) from exc
     else:
         raw_text = str(text)
 
