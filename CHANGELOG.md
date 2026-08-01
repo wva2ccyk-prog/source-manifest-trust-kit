@@ -7,6 +7,13 @@ leaves alpha.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.2.0] - 2026-08-01
+
+First tagged release. The `0.1.1` tree below was never tagged or published, so
+this is the first version with a downloadable release artifact.
+
 ### Added
 - Unicode de-obfuscation (`normalize_for_matching`) applied before every detector
   and before report masking: format/zero-width/control-char stripping, NFKC
@@ -64,11 +71,16 @@ leaves alpha.
   templates to make maintenance and contribution expectations explicit.
 - Added `docs/REVIEW_FINDINGS_2026-08-01.md`, an external review of the tree
   recording verified-accurate claims alongside a prioritized fix plan.
-- Added `docs/OPEN_FOLLOWUP_F4_RELEASE_TAGGING.md`, a step-by-step runbook for the
-  one review finding that needs an owner decision: the `v0.1.1` tag and release
-  that `CHANGELOG.md` already links to but which does not exist on the remote.
+- Resolved the review's release-tagging finding by cutting this release from
+  `main` instead of tagging the historical `0.1.1` tree, which predates the
+  hardening work and shipped the vulnerable DOMPurify. The `0.1.1` entry is now
+  marked as an untagged historical record and its dead links are removed.
 
-## [0.1.1] - 2026-06-30
+## [0.1.1] - 2026-06-30 (never tagged)
+
+Historical record only. This version was documented but never tagged or
+released, so there is no `v0.1.1` tag or release to link to. It also predates the
+security hardening in `0.2.0`; do not use this tree.
 
 ### Added
 - Initial public alpha release of the deterministic local source-manifest
@@ -82,5 +94,5 @@ leaves alpha.
   or LLM calls by default, and finance/hype wording is masked in report
   surfaces. See `SECURITY.md`, `docs/THREAT_MODEL.md`, and `docs/RISK_POLICY.md`.
 
-[Unreleased]: https://github.com/wva2ccyk-prog/source-manifest-trust-kit/compare/v0.1.1...HEAD
-[0.1.1]: https://github.com/wva2ccyk-prog/source-manifest-trust-kit/releases/tag/v0.1.1
+[Unreleased]: https://github.com/wva2ccyk-prog/source-manifest-trust-kit/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/wva2ccyk-prog/source-manifest-trust-kit/releases/tag/v0.2.0
