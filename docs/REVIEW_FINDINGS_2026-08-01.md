@@ -9,6 +9,11 @@ acquisition, risk-policy, LLM-review, CLI, and frontend surfaces.
 This document records what was verified as accurate, what was found to be wrong
 or stale, and a prioritized fix plan. It does not change runtime behavior.
 
+**Status:** F1, F2, F3, F5, F6, and F7 are fixed in the follow-up branch
+`fix/p1-vendored-sanitizer-and-release-gate`. F4, F8, and F9 remain open: F4
+needs a tag and release, which is an owner decision, and F8/F9 are now tracked on
+the roadmap. Per-finding status is noted inline below.
+
 ## Verified accurate
 
 These documented claims were re-derived from the actual tree, not taken on trust:
@@ -37,6 +42,13 @@ These documented claims were re-derived from the actual tree, not taken on trust
 
 ### F1 — The documented release gate cannot pass from a fresh clone (P1, blocking)
 
+**Status: fixed.** `*.egg-info` now gets the same gitignore-managed exemption as
+the caches, and the gate cross-checks its own exemption list against
+`git check-ignore`, so an exemption that stops being gitignored fails loudly
+instead of silently waving a file through. Verified: the gate exits 0 with
+`[release-check] PASS`, and a deliberately planted `workspace_*/` directory and
+`.log` file are still reported.
+
 `README.md` and `docs/PUBLIC_READINESS.md` both gate public-alpha status on
 `python scripts/release_check.py`. Following the documented install first
 (`pip install -e '.[dev]'`, the only install path the README gives) the gate
@@ -64,6 +76,14 @@ should be run once from a clean clone and its output pasted into the release
 notes, since the current status claim rests on a gate nobody can currently pass.
 
 ### F2 — Vendored DOMPurify 3.0.9 is a known-vulnerable sanitizer (P1, security)
+
+**Status: fixed.** Re-vendored DOMPurify `3.0.9` → `3.4.12` and marked
+`15.0.12` → `18.0.7`, both pulled from the npm registry with the published
+`shasum` verified before use. marked 18 ships no pre-minified build, so the
+bundle is upstream `lib/marked.umd.js` kept under the existing `marked.min.js`
+filename; its browser-global `marked.parse` path was exercised before the swap
+because that is the viewer's only call site. `THIRD_PARTY_LICENSES.md` now
+records both shipped versions.
 
 `frontend/purify.min.js` is DOMPurify **3.0.9**, pinned as such in
 `THIRD_PARTY_LICENSES.md`. That version is affected by **CVE-2024-47875**
@@ -95,6 +115,13 @@ sanitizer.
 
 ### F3 — Nothing in CI or the test suite can detect F2 (P1, process)
 
+**Status: fixed.** Added `tests/test_vendored_frontend_assets.py`. It parses the
+version banner from each bundle, enforces a minimum-version floor (DOMPurify
+`3.1.3`, marked `15.0.12`), requires `THIRD_PARTY_LICENSES.md` to name the
+versions actually shipped, and asserts the upstream license headers survive
+minification. Stdlib only and offline. The license cross-check earned its place
+immediately by catching the stale `3.0.9` notice during the fix.
+
 `tests/test_frontend_static.py` asserts that DOMPurify loads before `app.js` and
 that `DOMPurify.sanitize(html)` is called, which is good wiring coverage — but no
 test asserts *which version* is vendored. CI's `supply-chain` job runs
@@ -108,6 +135,10 @@ and `frontend/marked.min.js` and enforces a minimum-version floor, so a future
 re-vendor cannot silently regress. Keep it stdlib-only and offline.
 
 ### F4 — `CHANGELOG.md` points at a release and tag that do not exist (P2)
+
+**Status: open, owner decision.** Creating a tag and cutting a release is a
+publishing action, so it is left to the owner rather than performed as part of a
+review.
 
 `CHANGELOG.md` documents a `[0.1.1] - 2026-06-30` entry and links to
 `releases/tag/v0.1.1` and `compare/v0.1.1...HEAD`. On the remote there are **no
@@ -123,6 +154,11 @@ the changelog true and starts building the evidence the readiness doc asks for.
 
 ### F5 — `CHANGELOG.md` omits the largest change in the tree (P2)
 
+**Status: fixed.** `[Unreleased]` now carries Added/Changed/Security entries for
+the unicode de-obfuscation layer, the Korean masking corrections, intake
+hardening, DNS-rebinding pinning, the `eval-goldset` lane and gold set, the
+sanitizer upgrade, and the test-count growth.
+
 The `[Unreleased]` section lists only the SPDX license-metadata change and the
 docs additions. It says nothing about commit `805b6b0`, which touched 30+ files,
 rewrote much of `core/risk_policy.py` (+890 lines), added the evaluation harness
@@ -136,6 +172,10 @@ opt-in on intake, DNS-rebinding pinning, and the `eval-goldset` lane.
 
 ### F6 — `ROADMAP.md` lists already-shipped work as `planned` (P2)
 
+**Status: fixed.** The exit-code contract item is now `done` and points at
+`docs/CLI_CONTRACT.md`; the masking-coverage item names the three aspirational
+gold cases as the concrete open gaps.
+
 Near-term item "`planned` Document a stable exit-code contract for the CLI" is
 already delivered: `docs/CLI_CONTRACT.md` specifies `0`/`2` and the
 traceback-suppression rule, and this review confirmed all four error paths
@@ -147,6 +187,16 @@ edge-case coverage" item should also name the three known aspirational gold
 cases, since those are the concrete open gaps.
 
 ### F7 — Acquisition provenance metadata under-reports its own DNS check (P3)
+
+**Status: fixed.** The fetch path now records
+`dns_checked_when_requested: true` plus a new
+`fetch_connection_pinned_to_validated_ip: true`, both set from what that path
+actually does. The flag is corrected after loading rather than by passing
+`resolve_dns=True` to the loader: that would perform a second resolution per
+source, and an existing test correctly pins the fetch to exactly one
+`getaddrinfo` call per source, since the extra resolution is precisely what the
+pinning design exists to avoid. The validate-only lane still reports `false`, and
+the residual-risk disclosure (`dns_rebinding_not_fully_eliminated`) is unchanged.
 
 `fetch_acquisition_manifest` calls `load_acquisition_manifest(manifest_file)`
 without `resolve_dns=True`, so the emitted
@@ -167,6 +217,10 @@ from the fetch behavior rather than from the loader argument.
 
 ### F8 — Non-UTF-8 source files surface a raw codec error (P3)
 
+**Status: open, tracked.** Added to `ROADMAP.md` near-term next to the existing
+troubleshooting item. The fix touches intake error handling and belongs with that
+work rather than a review branch.
+
 A source file that is not UTF-8 fails with
 `Error: 'utf-8' codec can't decode byte 0xff in position 0: invalid start byte`.
 The exit code and traceback suppression are correct, but the message does not
@@ -177,6 +231,9 @@ is the concrete case to fix alongside it — wrap the read and name the offendin
 
 ### F9 — Quickstart leads with PowerShell on a cross-platform project (P3)
 
+**Status: open, owner decision.** Which platform the README leads with is an
+editorial call about the intended primary audience.
+
 CI covers ubuntu/macos/windows across Python 3.10–3.13, but the README's
 "3-Minute Quickstart" is PowerShell-only, with POSIX commands relegated to a
 section near the bottom; the Current Status line also quotes
@@ -186,25 +243,30 @@ use a forward slash in prose.
 
 ## Prioritized fix plan
 
-| # | Finding | Priority | Type |
-|---|---|---|---|
-| 1 | F2 upgrade vendored DOMPurify past CVE-2024-47875 | P1 | Security |
-| 2 | F3 add vendored-asset version-floor test | P1 | Process |
-| 3 | F1 make `release_check.py` pass after the documented install | P1 | Blocking |
-| 4 | F4 tag `v0.1.1` and cut the release the changelog links to | P2 | Accuracy |
-| 5 | F5 changelog entries for the hardening commit | P2 | Accuracy |
-| 6 | F6 roadmap status correction | P2 | Accuracy |
-| 7 | F7 acquisition boundary metadata reflects the DNS check performed | P3 | Correctness |
-| 8 | F8 actionable encoding error message | P3 | UX |
-| 9 | F9 POSIX-first quickstart | P3 | Docs |
+| # | Finding | Priority | Type | Status |
+|---|---|---|---|---|
+| 1 | F2 upgrade vendored DOMPurify past CVE-2024-47875 | P1 | Security | fixed |
+| 2 | F3 add vendored-asset version-floor test | P1 | Process | fixed |
+| 3 | F1 make `release_check.py` pass after the documented install | P1 | Blocking | fixed |
+| 4 | F4 tag `v0.1.1` and cut the release the changelog links to | P2 | Accuracy | open |
+| 5 | F5 changelog entries for the hardening commit | P2 | Accuracy | fixed |
+| 6 | F6 roadmap status correction | P2 | Accuracy | fixed |
+| 7 | F7 acquisition boundary metadata reflects the DNS check performed | P3 | Correctness | fixed |
+| 8 | F8 actionable encoding error message | P3 | UX | open |
+| 9 | F9 POSIX-first quickstart | P3 | Docs | open |
 
-F1–F3 should land before any release or submission claim: two of them are the
-difference between a documented gate that passes and one that cannot, and the
-third is a known-vulnerable sanitizer on the untrusted-input path.
+F1–F3 were the release blockers: two were the difference between a documented
+gate that passes and one that cannot, and the third was a known-vulnerable
+sanitizer on the untrusted-input path. All three are fixed. F4 is the remaining
+item that gates the public-release evidence `docs/PUBLIC_READINESS.md` asks for.
 
 ## Out of scope for this review
 
-No runtime behavior was changed. Detector precision, masking policy, and the
-gold-set labels were audited for internal consistency and left untouched — the
-three aspirational failures are correct policy labels documenting real gaps and
-must not be "fixed" by weakening them, as `README.md` already states.
+Detector precision, masking policy, and the gold-set labels were audited for
+internal consistency and deliberately left untouched. The three aspirational
+failures are correct policy labels documenting real gaps and must not be "fixed"
+by weakening them, as `README.md` already states.
+
+The only runtime change made in the follow-up branch is the acquisition boundary
+metadata in F7, which corrects what the audit artifact reports about the controls
+that already ran; it does not change which requests are allowed or blocked.
