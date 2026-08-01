@@ -614,6 +614,13 @@ def fetch_acquisition_manifest(
     if extractor_name not in HTML_EXTRACTORS:
         raise AcquisitionError(f"html_extractor must be one of: {', '.join(sorted(HTML_EXTRACTORS))}")
     normalized_manifest = load_acquisition_manifest(manifest_file)
+    # The loader is called WITHOUT resolve_dns (a second resolution per source
+    # would only add DNS traffic; the authoritative resolve happens per-source in
+    # the fetch loop below, which pins the connection to a validated address).
+    # Record the boundary from what this path actually does, otherwise the frozen
+    # operator-facing audit artifact understates the control that ran.
+    normalized_manifest["acquisition_boundary"]["dns_checked_when_requested"] = True
+    normalized_manifest["acquisition_boundary"]["fetch_connection_pinned_to_validated_ip"] = True
 
     root = Path(output_root).resolve()
     source_dir = root / "acquired_sources" / _safe_slug(normalized_manifest["issue_id"])

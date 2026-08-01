@@ -372,3 +372,47 @@ def test_acquisition_fetch_pins_connection_to_validated_address(tmp_path, monkey
     # a second resolution there would reopen the DNS-rebinding TOCTOU window.
     assert connect_calls == [("93.184.216.34", 443)]
     assert len(getaddrinfo_calls) == 1
+
+
+def test_acquisition_fetch_boundary_records_the_dns_check_it_performed(tmp_path, monkeypatch):
+    """The frozen boundary artifact must not understate the control that ran.
+
+    The fetch path resolves each source and pins the connection to a validated
+    public address, so `dns_checked_when_requested` has to be true here. It
+    previously reported false because the manifest was loaded without
+    `resolve_dns`, which made the operator-facing audit trail describe a weaker
+    boundary than the one actually enforced.
+    """
+    manifest = _write_manifest(tmp_path / "boundary.json", [_source(url="https://example.invalid/status")])
+
+    monkeypatch.setattr(
+        "source_manifest_kit.acquisition.socket.getaddrinfo",
+        lambda host, port, *args, **kwargs: [(2, 1, 6, "", ("93.184.216.34", port))],
+    )
+
+    def _fake_create_connection(address, *args, **kwargs):
+        raise OSError("no real network access in test")
+
+    monkeypatch.setattr("source_manifest_kit.acquisition.socket.create_connection", _fake_create_connection)
+
+    output_root = tmp_path / "acquired"
+    log_path = fetch_acquisition_manifest(manifest_file=manifest, output_root=output_root)
+
+    normalized = json.loads((output_root / "acquisition_manifest.normalized.json").read_text(encoding="utf-8"))
+    boundary = normalized["acquisition_boundary"]
+    assert boundary["dns_checked_when_requested"] is True
+    assert boundary["fetch_connection_pinned_to_validated_ip"] is True
+    # Residual risk must stay disclosed: pinning narrows the rebinding window but
+    # does not eliminate platform resolver behavior.
+    assert boundary["dns_rebinding_not_fully_eliminated"] is True
+
+    # The acquisition log embeds the same boundary block operators review.
+    log = json.loads(log_path.read_text(encoding="utf-8"))
+    assert log["acquisition_boundary"]["dns_checked_when_requested"] is True
+
+
+def test_validate_only_path_does_not_claim_a_dns_check(tmp_path):
+    """`load_acquisition_manifest` without resolve_dns must still report false."""
+    manifest = _write_manifest(tmp_path / "validate_only.json", [_source(url="https://example.com/article")])
+    normalized = load_acquisition_manifest(manifest)
+    assert normalized["acquisition_boundary"]["dns_checked_when_requested"] is False
