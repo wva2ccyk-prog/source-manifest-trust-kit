@@ -22,6 +22,9 @@ leaves alpha.
 - Minimum-version floors for the vendored browser assets
   (`tests/test_vendored_frontend_assets.py`). CI's supply-chain job only scans
   the Python environment, so nothing previously covered `frontend/`.
+- `source_manifest_kit/core/text_io.py`, a shared operator-source text reader
+  that names the offending source, the failing byte, and the remedy when a local
+  `.txt`/`.md` file is not valid UTF-8. A leading BOM is still accepted.
 
 ### Changed
 - Modernized packaging license metadata to the SPDX `license = "MIT"` string
@@ -38,7 +41,10 @@ leaves alpha.
   metadata (`*.egg-info`), which the documented editable install creates. The
   gate now also cross-checks its own exemptions against `git check-ignore`, so an
   exemption that stops being gitignored fails loudly instead of silently passing.
-- Test suite grew from 138 to 282 tests.
+- README quickstart now leads with a POSIX block alongside the PowerShell one,
+  matching the cross-platform CI matrix, and the duplicated macOS/Linux section
+  was removed.
+- Test suite grew from 138 to 287 tests.
 
 ### Security
 - Upgraded vendored DOMPurify from `3.0.9` to `3.4.12`. The previous version
@@ -58,6 +64,9 @@ leaves alpha.
   templates to make maintenance and contribution expectations explicit.
 - Added `docs/REVIEW_FINDINGS_2026-08-01.md`, an external review of the tree
   recording verified-accurate claims alongside a prioritized fix plan.
+- Added `docs/OPEN_FOLLOWUP_F4_RELEASE_TAGGING.md`, a step-by-step runbook for the
+  one review finding that needs an owner decision: the `v0.1.1` tag and release
+  that `CHANGELOG.md` already links to but which does not exist on the remote.
 
 ## [0.1.1] - 2026-06-30
 

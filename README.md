@@ -18,7 +18,24 @@ This is for local operator workflows. It is not a hosted service or autonomous r
 
 ## 3-Minute Quickstart
 
-From this directory:
+From this directory. CI covers Linux, macOS, and Windows on Python 3.10-3.13;
+pick the block for your shell.
+
+POSIX (macOS/Linux):
+
+```bash
+python -m venv .venv
+. .venv/bin/activate
+python -m pip install -e '.[dev]'
+python -m source_manifest_kit --help
+python -m source_manifest_kit analysis-package --source-manifest examples/synthetic_analysis_sources.json --output-root workspace --excluded-detail-mode detailed
+python -m source_manifest_kit bundle-summary --issue-dir workspace/issues/synthetic_source_review
+python -m source_manifest_kit llm-review-packet --operator-package-dir workspace/operator_package
+python -m source_manifest_kit mock-llm-review --packet-file workspace/operator_package/llm_review/llm_review_packet.json
+python -m source_manifest_kit llm-review-adapter --packet-file workspace/operator_package/llm_review/llm_review_packet.json --provider openai-compatible --output-dir workspace/provider_template
+```
+
+Windows (PowerShell):
 
 ```powershell
 python -m venv .venv
@@ -33,8 +50,8 @@ python -m venv .venv
 
 Run tests:
 
-```powershell
-.\.venv\Scripts\python -m pytest
+```bash
+python -m pytest
 ```
 
 No paid API key is required.
@@ -68,7 +85,7 @@ Use synthetic examples for demos. Do not publish private source packages, raw lo
 
 ## Current Status
 
-Public alpha candidate, pending the release gate (python -m pytest -q and python scripts\release_check.py). The package has a working local CLI, deterministic test suite, realistic synthetic walkthrough, LLM-review packet, no-key mocked review path, stricter path/URL/LLM-response validation, and public repository baseline documents.
+Public alpha candidate, pending the release gate (`python -m pytest -q` and `python scripts/release_check.py`). The package has a working local CLI, deterministic test suite, realistic synthetic walkthrough, LLM-review packet, no-key mocked review path, stricter path/URL/LLM-response validation, and public repository baseline documents.
 
 It is not a fact checker, not truth verification, not RAG evaluation, and not finance or investment guidance. Run the full test suite and review `docs/THREAT_MODEL.md` before relying on it. A Codex-for-OSS submission remains future-only until public repository evidence exists.
 
@@ -126,17 +143,7 @@ python -m source_manifest_kit eval-goldset --goldset evaluation/goldset_v1.jsonl
 - `PUBLICATION_RISK_REVIEW.md`: pre-publication risk review.
 - `SECURITY.md`, `CONTRIBUTING.md`, `LICENSE`: public repository basics.
 
-## macOS/Linux quick start
-
-```bash
-python -m venv .venv
-. .venv/bin/activate
-python -m pip install -e '.[dev]'
-python -m source_manifest_kit analysis-package --source-manifest examples/synthetic_analysis_sources.json --output-root workspace --excluded-detail-mode detailed
-python -m pytest
-```
-
-### Optional extras
+## Optional extras
 
 The runtime core keeps third-party dependencies out of the default install. Extras are available for bounded helper lanes:
 

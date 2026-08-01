@@ -17,10 +17,11 @@ Status legend: `planned`, `exploring`, `done`.
   tracebacks suppressed for known user-facing errors unless `--debug` is passed.
 - `planned` Expand the realistic example set with more publisher and source-type
   variety so risk labeling behavior is easier to inspect.
-- `planned` Add a short troubleshooting section for common manifest formatting
-  mistakes (missing fields, mixed encodings, empty source bodies).
-- `planned` Name the offending `sources[n]` entry and its path when a source file
-  is not valid UTF-8, instead of surfacing the raw codec error.
+- `done` Name the offending source and its path when a source file is not valid
+  UTF-8, instead of surfacing the raw codec error. See
+  `source_manifest_kit/core/text_io.py`.
+- `planned` Add a short troubleshooting section for the remaining common manifest
+  formatting mistakes (missing fields, empty source bodies).
 
 ## Medium term
 
