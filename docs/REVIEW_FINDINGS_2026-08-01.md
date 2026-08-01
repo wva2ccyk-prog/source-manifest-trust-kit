@@ -9,10 +9,11 @@ acquisition, risk-policy, LLM-review, CLI, and frontend surfaces.
 This document records what was verified as accurate, what was found to be wrong
 or stale, and a prioritized fix plan. It does not change runtime behavior.
 
-**Status:** F1, F2, F3, F5, F6, and F7 are fixed in the follow-up branch
-`fix/p1-vendored-sanitizer-and-release-gate`. F4, F8, and F9 remain open: F4
-needs a tag and release, which is an owner decision, and F8/F9 are now tracked on
-the roadmap. Per-finding status is noted inline below.
+**Status:** eight of nine findings are fixed in the follow-up branch
+`fix/p1-vendored-sanitizer-and-release-gate`. Only F4 remains open, because
+tagging and publishing a release is an owner decision; it has a step-by-step
+runbook at `docs/OPEN_FOLLOWUP_F4_RELEASE_TAGGING.md`. Per-finding status is noted
+inline below.
 
 ## Verified accurate
 
@@ -136,9 +137,12 @@ re-vendor cannot silently regress. Keep it stdlib-only and offline.
 
 ### F4 — `CHANGELOG.md` points at a release and tag that do not exist (P2)
 
-**Status: open, owner decision.** Creating a tag and cutting a release is a
-publishing action, so it is left to the owner rather than performed as part of a
-review.
+**Status: open, owner decision — runbook written.** Creating a tag and cutting a
+release is a publishing action, so it is left to the owner rather than performed as
+part of a review. `docs/OPEN_FOLLOWUP_F4_RELEASE_TAGGING.md` makes it executable
+without re-deriving anything: the two options and their trade-offs, the verified
+target commit (`0231593`), exact commands, draft release notes, verification steps,
+and the failure modes to avoid.
 
 `CHANGELOG.md` documents a `[0.1.1] - 2026-06-30` entry and links to
 `releases/tag/v0.1.1` and `compare/v0.1.1...HEAD`. On the remote there are **no
@@ -217,9 +221,13 @@ from the fetch behavior rather than from the loader argument.
 
 ### F8 — Non-UTF-8 source files surface a raw codec error (P3)
 
-**Status: open, tracked.** Added to `ROADMAP.md` near-term next to the existing
-troubleshooting item. The fix touches intake error handling and belongs with that
-work rather than a review branch.
+**Status: fixed.** Added `source_manifest_kit/core/text_io.py`, a shared
+operator-source reader used by `runs.analyze_file` and `capture_helper`. The error
+now names the source, the failing byte offset and value, and the remedy. Because
+`UnicodeDecodeError` is already a `ValueError`, exit code 2 and traceback
+suppression were never broken — only the message was unhelpful — so the wrapper
+preserves that hierarchy instead of introducing a new exception type. BOM
+stripping is unchanged and now has a regression test.
 
 A source file that is not UTF-8 fails with
 `Error: 'utf-8' codec can't decode byte 0xff in position 0: invalid start byte`.
@@ -231,8 +239,9 @@ is the concrete case to fix alongside it — wrap the read and name the offendin
 
 ### F9 — Quickstart leads with PowerShell on a cross-platform project (P3)
 
-**Status: open, owner decision.** Which platform the README leads with is an
-editorial call about the intended primary audience.
+**Status: fixed.** The quickstart now leads with a POSIX block and keeps the
+PowerShell block beside it, the duplicated macOS/Linux section is removed, and the
+Windows path separator in the Current Status line is corrected.
 
 CI covers ubuntu/macos/windows across Python 3.10–3.13, but the README's
 "3-Minute Quickstart" is PowerShell-only, with POSIX commands relegated to a
@@ -252,13 +261,14 @@ use a forward slash in prose.
 | 5 | F5 changelog entries for the hardening commit | P2 | Accuracy | fixed |
 | 6 | F6 roadmap status correction | P2 | Accuracy | fixed |
 | 7 | F7 acquisition boundary metadata reflects the DNS check performed | P3 | Correctness | fixed |
-| 8 | F8 actionable encoding error message | P3 | UX | open |
-| 9 | F9 POSIX-first quickstart | P3 | Docs | open |
+| 8 | F8 actionable encoding error message | P3 | UX | fixed |
+| 9 | F9 POSIX-first quickstart | P3 | Docs | fixed |
 
 F1–F3 were the release blockers: two were the difference between a documented
 gate that passes and one that cannot, and the third was a known-vulnerable
-sanitizer on the untrusted-input path. All three are fixed. F4 is the remaining
-item that gates the public-release evidence `docs/PUBLIC_READINESS.md` asks for.
+sanitizer on the untrusted-input path. All three are fixed. F4 is the only item
+left, and it gates the public-release evidence `docs/PUBLIC_READINESS.md` asks
+for; see `docs/OPEN_FOLLOWUP_F4_RELEASE_TAGGING.md` to execute it.
 
 ## Out of scope for this review
 
@@ -267,6 +277,8 @@ internal consistency and deliberately left untouched. The three aspirational
 failures are correct policy labels documenting real gaps and must not be "fixed"
 by weakening them, as `README.md` already states.
 
-The only runtime change made in the follow-up branch is the acquisition boundary
-metadata in F7, which corrects what the audit artifact reports about the controls
-that already ran; it does not change which requests are allowed or blocked.
+Runtime changes in the follow-up branch are limited to two narrow items: the
+acquisition boundary metadata in F7, which corrects what the audit artifact
+reports about controls that already ran rather than changing which requests are
+allowed or blocked, and the F8 encoding error path, which changes an error
+message while preserving the existing exception hierarchy and exit code.
