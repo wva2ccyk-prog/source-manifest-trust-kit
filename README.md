@@ -1,5 +1,13 @@
 # Source Manifest Trust Kit
 
+> **Archived (2026-09).** This project is no longer developed. Its
+> keyword-based classifier does not reliably keep unverified claims out of
+> "confirmed" or low-risk buckets on realistic input. Its original goal,
+> catching rumors that news and AI assistants repeat as fact, is better served
+> by a verification procedure for web-searching models plus a human-verified
+> case dataset. See [`docs/PROJECT_CLOSEOUT_2026-09.md`](docs/PROJECT_CLOSEOUT_2026-09.md)
+> for the findings, a survey of similar projects, and what to build instead.
+
 Source Manifest Trust Kit is a local, deterministic CLI toolkit for analyzing source packages that an operator has already collected. It turns local text files and source manifests into claim ledgers, risk labels, verification work items, and operator-safe reports.
 
 It does not search the web, fetch arbitrary sources by default, call LLMs, verify truth, or give finance advice.
@@ -84,6 +92,8 @@ Use synthetic examples for demos. Do not publish private source packages, raw lo
 `bundle-run` rejects absolute file paths by default. Use `--allow-absolute-paths` only for trusted local bundles that you generated and reviewed yourself. Direct URL acquisition is a separate pre-runtime lane; use `acquisition-validate --resolve-dns` when you want DNS checks before fetch, and treat fetched content as acquisition-only, not truth verification.
 
 ## Current Status
+
+Archived. See [`docs/PROJECT_CLOSEOUT_2026-09.md`](docs/PROJECT_CLOSEOUT_2026-09.md). The status recorded at `v0.2.0` follows for reference.
 
 Public alpha candidate, pending the release gate (`python -m pytest -q` and `python scripts/release_check.py`). The package has a working local CLI, deterministic test suite, realistic synthetic walkthrough, LLM-review packet, no-key mocked review path, stricter path/URL/LLM-response validation, and public repository baseline documents.
 

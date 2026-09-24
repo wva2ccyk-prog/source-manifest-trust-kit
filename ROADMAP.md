@@ -1,5 +1,8 @@
 # Roadmap
 
+> **Archived (2026-09).** The items below are frozen and will not be pursued.
+> See [`docs/PROJECT_CLOSEOUT_2026-09.md`](docs/PROJECT_CLOSEOUT_2026-09.md).
+
 This roadmap describes the direction for Source Manifest Trust Kit. It is a
 local, deterministic operator tool, so every item here must preserve the core
 boundary: no truth verification, no source ranking authority, no finance advice,

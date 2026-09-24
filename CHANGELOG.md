@@ -7,7 +7,11 @@ leaves alpha.
 
 ## [Unreleased]
 
-Nothing yet.
+### Changed
+- Project archived. Added `docs/PROJECT_CLOSEOUT_2026-09.md` covering the
+  post-release review findings, a survey of similar projects, and the
+  recommended successor direction. README and ROADMAP now carry an archived
+  notice. No runtime changes.
 
 ## [0.2.0] - 2026-08-01
 
